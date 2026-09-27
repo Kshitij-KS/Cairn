@@ -78,9 +78,9 @@ def main():
         ok("owner placeholders filled in notes", "__OWNER_NAME__" not in company and "Ada Lovelace" in company)
         core = open(os.path.join(root, "CORE.md"), encoding="utf-8").read()
         ok("notes stamped with the owner as author", "author: ada" in core, core[:300])
-        ok("template-only files removed, LICENSE and NOTICE kept",
+        ok("template-only files removed, LICENSE, LICENSE-NOTES and NOTICE kept",
            not any(os.path.exists(os.path.join(root, ".github", f)) for f in ("README.md", "CONTRIBUTING.md", "SECURITY.md"))
-           and os.path.exists(os.path.join(root, "LICENSE")) and os.path.exists(os.path.join(root, "NOTICE")))
+           and all(os.path.exists(os.path.join(root, f)) for f in ("LICENSE", "LICENSE-NOTES", "NOTICE")))
         _, email = run(["git", "config", "--local", "user.email"], root)
         ok("repository git identity set to the owner", email.strip() == "ada@example.test", email)
         run(["git", "add", "-A"], root)

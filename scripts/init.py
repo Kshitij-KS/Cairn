@@ -19,7 +19,7 @@ What it does, in order:
   5. writes .github/CODEOWNERS from the owners in roles.json;
   6. stamps every note with you as its author;
   7. removes the open-source project's README, CONTRIBUTING and SECURITY files from .github/, so the
-     repository's front page is the team guide (README.md). LICENSE and NOTICE stay.
+     repository's front page is the team guide (README.md). LICENSE, LICENSE-NOTES and NOTICE stay.
 
 It refuses to run twice (an initialised instance has "instance": true in roles.json) unless you
 pass --force. Standard library only.
@@ -167,7 +167,7 @@ def main(argv):
 
     # 2b. the open-source project's own front page and contribution files describe Cairn, not your
     # team: remove them so the repository's GitHub page shows the team guide (README.md).
-    # LICENSE and NOTICE stay: the licence requires them.
+    # LICENSE, LICENSE-NOTES and NOTICE stay: the licences require them.
     gone = [f for f in TEMPLATE_ONLY if os.path.exists(os.path.join(ROOT, f))]
     for f in gone:
         os.remove(os.path.join(ROOT, f))

@@ -771,7 +771,7 @@ Things worth trying to break, each with the expected result:
 | `scripts/sync-memory.py/.sh/.ps1` | 159 / 307 / 350 | sync dispatcher and implementations |
 | `scripts/new-project-memory.sh/.ps1` | 101 / 112 | project scaffold |
 | `scripts/init.py` | 219 | turns the template into an instance: owner row, placeholders, git identity, CODEOWNERS, stamps, removes template-only files |
-| `LICENSE`, `NOTICE`, `.github/README.md`, `.github/CONTRIBUTING.md`, `.github/SECURITY.md` | - | the open-source project's licence and front page; `init.py` removes the three `.github/` files in an instance |
+| `LICENSE`, `LICENSE-NOTES`, `NOTICE`, `.github/README.md`, `.github/CONTRIBUTING.md`, `.github/SECURITY.md` | - | the licences (Apache-2.0 for code, MIT-0 for notes, templates and agent configuration; `NOTICE` has the split) and the open-source front page; `init.py` removes the three `.github/` files in an instance |
 | `governance/roles.json` | 478 | all policy |
 | `governance/ACCESS.md`, `SIGNIFICANCE.md` | 171 / 125 | policy in prose |
 | `CLAUDE.md`, `.cursor/rules/memory.mdc`, `.kiro/steering/memory.md` | 203 / 83 / 80 | agent rules |

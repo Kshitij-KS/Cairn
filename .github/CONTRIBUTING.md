@@ -38,8 +38,9 @@ Nothing needs a network connection or an API key.
 3. Update `ARCHITECTURE.md` when you change a component, a folder's level, an exit code or a
    workflow.
 
-By contributing you agree that your contribution is licensed under the Apache License 2.0
-(see `LICENSE`, section 5).
+By contributing you agree that your contribution is licensed under the licence of the files it
+changes: the Apache License 2.0 for code (`LICENSE`, section 5), MIT-0 for everything else
+(`LICENSE-NOTES`). `NOTICE` lists which is which.
 
 ## Reporting a vulnerability
 

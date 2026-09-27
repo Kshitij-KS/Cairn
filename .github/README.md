@@ -483,5 +483,13 @@ library only, a failing-first test for every change, and no real people or compa
 
 ## License
 
-[Apache License 2.0](../LICENSE). Copyright 2026 Kshitij Singh. See [`NOTICE`](../NOTICE) for the
-third-party programs Cairn works alongside.
+Copyright 2026 Kshitij Singh. Two licences, split by what a file is:
+
+| Files | Licence |
+|---|---|
+| **Code**: `scripts/`, `tools/`, `web/`, `.github/workflows/` | [Apache License 2.0](../LICENSE) |
+| **Everything else**: the starter notes, templates and agent configuration | [MIT No Attribution](../LICENSE-NOTES) |
+
+MIT-0 needs no attribution, so your team can rewrite the starter notes into its own memory
+freely. The notes you write are yours and are covered by neither licence. See
+[`NOTICE`](../NOTICE) for the exact split and the third-party programs Cairn works alongside.

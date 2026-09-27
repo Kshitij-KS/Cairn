@@ -1,7 +1,20 @@
 Cairn
 Copyright 2026 Kshitij Singh
 
-This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+Cairn is published under two licences, split by what a file is:
+
+  The code: Apache License 2.0 (see LICENSE)
+    scripts/, tools/, web/, .github/workflows/
+
+  Everything else: MIT No Attribution, MIT-0 (see LICENSE-NOTES)
+    the starter notes and documents (CORE.md, context/, decisions/, features/, projects/, log/,
+    trials/, evals/, governance/, README.md, RUNBOOK.md, ARCHITECTURE.md, CLAUDE.md), the
+    project-memory templates (templates/), and the agent configuration (.agents/, .claude/,
+    .kiro/, .cursor/, .mcp.json, .basic-memory/).
+
+MIT-0 needs no attribution and no change notices, so a team can rewrite the starter notes into
+its own memory without carrying anything from this project. Notes a team writes are its own and
+are not covered by either licence.
 
 Cairn does not bundle or modify any third-party code. It works alongside the following separately
 installed programs, each under its own licence:
