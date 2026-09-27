@@ -976,6 +976,22 @@ def build(ctx, public=True):
                     f["gaps"] += 1
     trials = [dict(n["trial"], id=n["id"], title=n["title"]) for n in nodes if "trial" in n]
 
+    # Playbooks (ADR-005): trust is DERIVED here exactly as mem and the guard derive it, from the
+    # hash-bound approval and the run log beside each playbook. Only counts and labels are
+    # published; steps, caveats and run notes stay in the notes.
+    playbooks = []
+    node_by_path = {n["path"]: n for n in nodes}
+    for rel, abs_path, fm, body, _t in notes:
+        n = node_by_path.get(rel)
+        if not n or not rel.startswith("playbooks/") or (mg.fm_get(fm, "type") or "") != "playbook":
+            continue
+        runs_path = abs_path[:-3] + ".runs"
+        runs, _bad = mg.parse_runs(mg.read_text(runs_path) if os.path.isfile(runs_path) else "")
+        t = mg.playbook_trust(ctx, fm or [], body, runs)
+        playbooks.append({"id": n["id"], "playbook": mg.fm_get(fm, "id") or "", "title": n["title"],
+                          "trust": t["label"], "stale": t["stale"], "runs": t["runs"], "successes": t["successes"],
+                          "failed": t["failed"], "last_success": t["last_success"], "steps": len(mg.parse_steps(body))})
+
     # "What the agent saw": local, full builds only. The ledgers live in the
     # gitignored .memory/ on this machine; a public build never reads them.
     sessions = []
@@ -1008,7 +1024,7 @@ def build(ctx, public=True):
     repo_url = "https://github.com/%s/%s" % (m.group(1), m.group(2)) if m else None
 
     out = {
-        "schema": 3,
+        "schema": 4,
         "mode": "public" if public else "full",
         "project": ctx.project_name,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -1032,10 +1048,12 @@ def build(ctx, public=True):
             "features": len(features),
             "gaps": len(gaps),
             "live_trials": sum(1 for t in trials if t["status"] == "live"),
+            "playbooks": len(playbooks),
         },
         "features": features,
         "gaps": gaps,
         "trials": trials,
+        "playbooks": playbooks,
         "sessions": sessions,
         "nodes": nodes,
         "edges": edges,
@@ -1080,13 +1098,13 @@ SCHEMA = {
           "source_commit_at": _S, "repo_url": _OPT_S, "levels": dict, "dependency_types": list,
           "publication": dict, "withheld": dict, "stats": dict, "nodes": list, "edges": list,
           "arrangements": dict, "activity": list, "queue": dict, "health": dict, "features": list,
-          "gaps": list, "trials": list, "sessions": list},
+          "gaps": list, "trials": list, "playbooks": list, "sessions": list},
     "level": {"label": _S, "colour": _S, "paths": list, "may_change": list},
     "publication": {"$comment": _S, "brief_levels": list, "publish_commit_messages": bool,
                     "publish_authors": bool, "$comment_containment": _S},
     "withheld": {"restricted": int, "bodies": int, "briefs": int, "experiments": int},
     "stats": {k: int for k in ("notes", "observations", "relations", "dependencies", "authors",
-                               "commits", "claims", "features", "gaps", "live_trials")},
+                               "commits", "claims", "features", "gaps", "live_trials", "playbooks")},
     "node": {"id": _S, "path": _S, "title": _S, "folder": _S, "type": _S, "level": _S,
              "confidentiality": _S, "author": _OPT_S, "updated_by": _OPT_S, "agent": _OPT_S,
              "status": _OPT_S, "created": _OPT_S, "updated": _OPT_S, "age_days": (int, type(None)),
@@ -1116,6 +1134,8 @@ SCHEMA = {
     "gap": {"id": _OPT_S, "feature": _OPT_S, "text": type(None)},
     "trial": {"id": _S, "title": _S, "status": _OPT_S, "expires": _OPT_S, "owner": _OPT_S,
               "audience": int, "hypothesis": type(None)},
+    "playbook": {"id": _S, "playbook": _S, "title": _S, "trust": _S, "stale": bool, "runs": int,
+                 "successes": int, "failed": int, "last_success": _OPT_S, "steps": int},
 }
 _REQUIRED_TOP = set(SCHEMA["$"])
 
@@ -1157,8 +1177,8 @@ def verify_public(d):
     if not isinstance(d, dict):
         return ["the file is not a JSON object"]
     _shape(bad, d, "$", "$", _REQUIRED_TOP)
-    if d.get("schema") != 3:
-        bad.append("schema is %r, expected 3" % d.get("schema"))
+    if d.get("schema") != 4:
+        bad.append("schema is %r, expected 4" % d.get("schema"))
     if d.get("mode") != "public":
         bad.append("mode is %r, not public" % d.get("mode"))
     if bad:
@@ -1298,6 +1318,13 @@ def verify_public(d):
     for i, t in enumerate(d["trials"]):
         if _shape(bad, t, "trial", "$.trials[%d]" % i) and t.get("id") not in idset:
             bad.append("$.trials[%d]: not a public note" % i)
+    for i, pbk in enumerate(d["playbooks"]):
+        w = "$.playbooks[%d]" % i
+        if _shape(bad, pbk, "playbook", w):
+            if pbk.get("id") not in idset:
+                bad.append("%s: not a public note" % w)
+            if pbk.get("trust") not in ("approved", "reproduced", "unreviewed"):
+                bad.append("%s: unknown trust %r" % (w, pbk.get("trust")))
     if d["sessions"]:
         bad.append("local session ledgers published (%d)" % len(d["sessions"]))
     url = d.get("repo_url")

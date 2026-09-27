@@ -47,7 +47,7 @@ it would defeat the governance layer), authentication, natural-language query.
 
 `scripts/build_atlas.py` (standard library only) parses the notes with the guard's own parsers, so
 the page can never disagree with the enforcement engine; walks `git log` for activity (capped at
-200 entries); computes the layout; and writes one `web/data/graph.json` (schema 3). The page is
+200 entries); computes the layout; and writes one `web/data/graph.json` (schema 4). The page is
 `index.html` + `app.js` + `style.css`, with d3 v7 from a CDN. No build step; host it anywhere
 (`vercel.json` is included).
 

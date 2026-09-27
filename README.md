@@ -65,6 +65,7 @@ The name: a cairn is the stack of stones hikers leave to mark the trail for whoe
 | `projects/` | one status card per workstream | anyone (L0) |
 | `log/journal/` | observations: gotchas, fixes, dead ends | anyone, including agents (L0) |
 | `log/proposals/` | requests to change something above L0 | anyone (L0) |
+| `playbooks/` | finished multi-step tasks, replayable with a teammate, and their run logs | anyone (L0); trust is earned |
 | `trials/`, `evals/` | experiments on the memory, and retrieval tests | anyone (L0) |
 | `governance/`, `scripts/`, `tools/`, `.claude/`, ... | the rules, and the code the hooks run | owners (L3) |
 
@@ -314,7 +315,10 @@ Most of it happens without you doing anything.
 | When | What happens | How |
 |---|---|---|
 | a session starts | pulls the latest memory, opens a session record | hook (Claude Code, Kiro) |
-| you describe a task | the agent runs `mem load "<your task>"`: the big picture, then the feature you are on and its neighbours; one line tells you what it loaded | instructions in `CLAUDE.md` and the skill |
+| you send your first message | the memory for it is loaded automatically: the big picture, then the feature you are on and its neighbours; one line tells you what it loaded, or it asks you one question if it is unsure | hook (Claude Code); the agent runs `mem load` itself in Kiro and Cursor, as `CLAUDE.md` and the rules tell it |
+| you describe a later task | the agent runs `mem load "<your task>"` for it | instructions in `CLAUDE.md` and the skill |
+| a task matches a playbook | the receipt names it, and the agent offers to walk you through it | `mem load` |
+| a long multi-step task ends | the agent asks once whether to save it as a playbook | hook (Claude Code) |
 | a note you loaded changes upstream | a one-line warning, louder if its promise (contract) changed | hook (Claude Code) |
 | the conversation is compacted | the session record is marked so notes are re-read, not assumed | hook (Claude Code) |
 | a turn ends | anything worth keeping is written, checked by the guard, committed and pushed | hook |
@@ -353,12 +357,48 @@ Code and Cursor, type `/cairn` to see them all.
 | `/cairn-gaps [what was missing]` | note a question the memory could not answer, or list the open ones | `/cairn-gaps how do we rotate the signing key` |
 | `/cairn-try <change>` | open, list, keep or drop an experiment on the memory, visible only to the people you name until it is kept | `/cairn-try "the checkout card is too vague" --change 'add to "Checkout": [fact] ...' --for sam` |
 | `/cairn-feature` | list features, or propose a new one with the code it covers | `/cairn-feature new "Checkout" --covers "src/checkout/**"` |
+| `/playbook-find <words>` | find a task someone already did with an AI: steps, problems, fixes, how well it replays | `/playbook-find aws sso` |
+| `/playbook-run <ID>` | your AI walks you through it, asking before anything that changes your machine | `/playbook-run PB-7K3F` |
+| `/playbook-save [title]` | save the task you just finished as a playbook for the next person | `/playbook-save set up AWS SSO` |
 
 **Kiro and plain language.** Anywhere, you can simply say *"load the memory for this task"*,
 *"what do we know about SSO"*, *"remember that ..."*, or *"try this change for a week with Sam"*.
 The skill in `.agents/skills/team-memory/` tells the agent which command to run.
 
 ---
+
+## 6b. Playbooks: do it once, replay it forever
+
+Some work is not a fact but a **procedure**: setting up a laptop, getting cloud access, cutting a
+release. The first person does it with their AI and hits the problems; a **playbook** keeps what
+worked so the next person's AI can walk them through it.
+
+- **Save** (`/playbook-save`): at the end of a multi-step task, your AI writes the steps that worked,
+  in order, each with a way to check it worked, plus every problem you hit and its fix. Secrets and
+  anything specific to your machine become placeholders like `<YOUR_AWS_PROFILE>`. You see the draft
+  before it is saved. If a similar playbook exists, it offers to update that one instead.
+- **Find** (`/playbook-find`): search by words (typos are fine) or a regex, in this project and the
+  company memory. Each result shows its **trust**.
+- **Replay** (`/playbook-run`): your AI reads the playbook as information, never as orders. It runs
+  steps marked `[check]` (they only read), shows you every other command and waits for your OK,
+  applies the recorded fix *before* the step that needs it, checks each step, and at the end logs
+  how it went. `mem` itself never runs any command.
+
+**Trust is earned, not claimed:**
+
+| Label | Means |
+|---|---|
+| `unreviewed` | saved, but nobody else has replayed it successfully yet |
+| `reproduced` | someone other than the author replayed the current steps and it worked |
+| `approved` | a person with the role (a maintainer in a project, a steward company-wide) approved the current steps |
+| `stale` (added) | no success in the last 90 days |
+
+Editing a step resets `reproduced` and `approved` automatically. Nobody can log a run for someone
+else, delete a run record, or approve in someone else's name, and an agent can never approve; the
+guard checks all of it on every commit, and again in CI. Useful extras:
+`mem playbook begin` / `since` (mark the start of a task, then list what changed, to help write the
+steps), `mem playbook stats`, and `mem playbook export <ID>` (a plain checklist for anyone without an
+AI). Kiro has no slash commands; say "is there a playbook for ..." or "save this as a playbook".
 
 ## 7. The `mem` command line
 
@@ -376,6 +416,9 @@ The skill in `.agents/skills/team-memory/` tells the agent which command to run.
 | `mem try`, `trials`, `keep`, `drop` | experiments on the memory |
 | `mem eval [--trial SLUG]` | retrieval tests, optionally with an experiment applied |
 | `mem status`, `mem who`, `mem can HANDLE PATH` | who you are, who may change what |
+| `mem playbook find|run|save|log|caveat|approve|stats|export <...>` | playbooks (6b) |
+| `mem asks` | how often its guesses were accepted or corrected |
+| `mem playbook find\|run\|save\|log\|caveat\|approve\|stats\|export` | playbooks (section 6b) |
 | `mem --help` | everything else (`why`, `retire`, `pin`, `diff`, `approve`, `role`, `core init`, ...) |
 
 The guard: `uv run -q --script scripts/memory_guard.py check --staged` shows findings without

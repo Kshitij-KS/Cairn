@@ -82,6 +82,11 @@ RenderOrSuggest (Join-Path $cc 'kiro-mcp.json.tmpl')                (Join-Path $
 RenderOrSuggest (Join-Path $cc 'mcp.json.tmpl')                     (Join-Path $Target '.mcp.json')
 RenderOrSuggest (Join-Path $cc 'cursor-mcp.json.tmpl')              (Join-Path $Target '.cursor\mcp.json')
 RenderOrSuggest (Join-Path $cc 'claude-settings.json.tmpl')         (Join-Path $Target '.claude\settings.json')
+# 2b. where the company tier lives ON THIS MACHINE (memory\.memory is gitignored), so
+#     `mem playbook find` in the project also searches company playbooks.
+New-Item -ItemType Directory -Force -Path (Join-Path $Target 'memory\.memory') | Out-Null
+[System.IO.File]::WriteAllText((Join-Path $Target 'memory\.memory\company-root'), $CairnRoot + "`n", (New-Object System.Text.UTF8Encoding($false)))
+
 # 3b. the gate on GitHub: a memory-gate workflow scoped to memory/, and the memory block of
 #     CODEOWNERS (the product's own code owners are never touched).
 RenderOrSuggest (Join-Path $cc 'memory-gate.yml.tmpl') (Join-Path $Target '.github\workflows\memory-gate.yml')

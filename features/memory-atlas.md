@@ -21,7 +21,7 @@ A public build never contains a restricted note, a trial or eval body, or any no
 
 ## Observations
 - [status] Publishing is manual while automatic publication is paused ^cb4138
-- [fact] graph.json schema 3 carries features, gaps, trials and, in full builds only, local session ledgers; build_atlas.py --verify is the redaction gate CI runs ^308f40
+- [fact] graph.json schema 4 carries features, gaps, trials, playbooks (derived trust and counts only) and, in full builds only, local session ledgers; build_atlas.py --verify is the redaction gate CI runs ^308f40
 
 ## Relations
 - depends_on [[Memory Guard]]

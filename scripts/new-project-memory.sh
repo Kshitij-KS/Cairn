@@ -64,6 +64,10 @@ render_or_suggest "$TPL/client-config/mcp.json.tmpl"                    "$TARGET
 render_or_suggest "$TPL/client-config/cursor-mcp.json.tmpl"             "$TARGET/.cursor/mcp.json"
 render_or_suggest "$TPL/client-config/claude-settings.json.tmpl"        "$TARGET/.claude/settings.json"
 
+# 2b. where the company tier lives ON THIS MACHINE, so `mem playbook find` in the project also
+#     searches company playbooks. Per machine (memory/.memory/ is gitignored), never committed.
+mkdir -p "$TARGET/memory/.memory" && printf '%s\n' "$CAIRN_ROOT" > "$TARGET/memory/.memory/company-root"
+
 # 3b. the gate on GitHub: a memory-gate workflow scoped to memory/, and the memory block of
 #     CODEOWNERS (the product's own code owners are never touched). Without these, any code pull
 #     request could rewrite the project's features or its own roles.json unreviewed.

@@ -31,6 +31,10 @@ and writes to after**, with rules that are *enforced* rather than requested:
   role. Anything higher an agent wants becomes a proposal. Secrets, prompt injections and forged
   authorship are refused at commit, and once `main` is protected, by a pull-request gate that the
   pull request itself cannot weaken.
+- **Hard-won procedures become replayable.** Finish a multi-step setup with your AI, run
+  `/playbook-save`, and the next person's AI walks them through it, asking before anything that
+  changes their machine, with every problem you hit fixed before they reach it. Trust is earned by
+  successful replays, never claimed.
 - **No service to run.** Plain git, a local MCP server, standard-library Python and GitHub's free
   tier.
 
@@ -256,8 +260,9 @@ Then ask your agent: *"Load the team memory and tell me what this project is."*
 
 ## Using it every day
 
-Most of it is automatic: hooks pull at session start, the agent loads context for your task, and
-the end of each turn stamps, checks, commits and pushes whatever is worth keeping.
+Most of it is automatic: hooks pull at session start, your first message loads the context for it
+(in Claude Code a hook does this, so it does not depend on the agent remembering), and the end of
+each turn stamps, checks, commits and pushes whatever is worth keeping.
 
 ### Slash commands (Claude Code, Cursor)
 
@@ -270,9 +275,30 @@ the end of each turn stamps, checks, commits and pushes whatever is worth keepin
 | `/cairn-gaps [what was missing]` | record a question the memory could not answer, or list open ones |
 | `/cairn-try <change>` | an experiment on the memory, visible only to the people you name, with an expiry |
 | `/cairn-feature` | list features, or propose one with the code it covers |
+| `/playbook-find <words>` | find a task someone already did with an AI, with its steps, problems and fixes |
+| `/playbook-run <ID>` | your AI walks you through it, step by step, asking before any change |
+| `/playbook-save [title]` | save the multi-step task you just finished for the next person |
 
 In Kiro, or anywhere, plain language works: *"load the memory for this task"*, *"what do we know
 about SSO"*, *"remember that ..."*.
+
+### Playbooks
+
+```mermaid
+flowchart LR
+    D["you finish a multi-step task<br/>with your AI"] --> S["/playbook-save<br/>steps, checks, problems + fixes,<br/>placeholders for secrets"]
+    S --> P[("playbooks/PB-7K3F")]
+    P --> F["teammate: /playbook-find<br/>(or the load receipt names it)"]
+    F --> R["/playbook-run: their AI walks them through,<br/>asking before every change"]
+    R --> L["run logged"] --> T{"trust"}
+    T -->|"a success by someone else"| RP["reproduced"]
+    T -->|"a maintainer or steward approves the steps"| AP["approved"]
+```
+
+Trust is derived on every read from the run log and a hash-bound approval, so it cannot be
+claimed, and editing a step resets it. The guard refuses a run logged for someone else, a deleted
+run record, an approval by an agent or in someone else's name, and secrets in steps. `mem` never
+executes a playbook: the agent shows each command and the person says yes.
 
 ### The `mem` command line
 
@@ -285,6 +311,7 @@ WRITE       mem remember "<fact>" [--feature NAME]  a fact, or a proposal if abo
             mem gap "<what was missing>"            mem feature new NAME --covers GLOB
 STEER       mem pin | mute | why ^id                personal steering, provenance of a fact
 EXPERIMENT  mem try | trials | keep | drop          mem eval [--trial SLUG]
+PLAYBOOKS   mem playbook find | run | save | log     mem playbook approve | stats | export
 GOVERN      mem status | who | can HANDLE PATH      mem approve <proposal> --apply
 ```
 
@@ -416,6 +443,7 @@ always runs.
 │   ├── journal/                observations: gotchas, fixes, dead ends (L0)
 │   ├── proposals/              requests to change anything above L0 (L0)
 │   └── CHANGELOG.md            one line per commit, appended by CI (L3)
+├── playbooks/                  finished tasks to replay, each with a run log (L0; trust is earned)
 ├── trials/  evals/             experiments on the memory, retrieval tests (L0)
 ├── governance/
 │   ├── roles.json              people, roles, path levels: the only policy file (L3)
@@ -488,6 +516,7 @@ cd web/test && npm ci && npm test         # the Atlas page, and a negative test 
 | `test_gate.py` | the pull-request gate, run the way CI runs it, against an attack PR |
 | `test_sync.py` | sync against local remotes (`--impl bash`, `powershell` or `all`), including a protected `main` and the pull-request mode |
 | `test_init.py` | `init.py` produces a guard-clean instance and refuses bad input and a second run |
+| `test_playbooks.py` | save, find, guided replay, derived trust, and every guard rule behind them, staged and in CI, including concurrent run logs |
 | `test_scaffold.py` | a project tier gets its gate workflow and CODEOWNERS block, never overwrites the product's files, and a second run changes nothing |
 | `test_parsers.py` | shared frontmatter and claim parsers |
 

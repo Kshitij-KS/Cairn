@@ -1,0 +1,2 @@
+# Run logs are append-only: two people logging at once keep both lines.
+playbooks/*.runs merge=union

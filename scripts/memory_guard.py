@@ -27,6 +27,7 @@ Standard library only, so it runs on a fresh machine with no network and no inst
 
 import argparse
 import difflib
+import collections
 import hashlib
 import json
 import os
@@ -41,7 +42,7 @@ LEVEL_ORDER = ["L0", "L1", "L2", "L3"]
 EXIT_OK, EXIT_SECRET, EXIT_DENIED, EXIT_INVALID, EXIT_INTERNAL = 0, 3, 4, 5, 6
 
 NOTE_DIRS = ("context", "decisions", "projects", "log", "governance", "templates",
-             "features", "trials", "evals")
+             "features", "trials", "evals", "playbooks")
 
 # --------------------------------------------------------------------------- shell helpers
 
@@ -638,7 +639,7 @@ INJECTION_PATTERNS = [
     (r"(?i)ignore (all |any )?(your |the )?(previous|prior|above|earlier) (instructions|rules|prompts)", "instruction override"),
     (r"(?i)disregard (the |your )?(rules|instructions|system prompt)", "instruction override"),
     (r"(?i)you (must|should) (now )?(run|execute|curl|wget|pipe)\b", "imperative command to a future agent"),
-    (r"(?i)\bcurl\s+[^\s|]+\s*\|\s*(ba)?sh\b", "pipe-to-shell"),
+    (r"(?i)\b(curl|wget)\b[^|\n]*\|\s*(sudo\s+)?(ba|z|da)?sh\b|\b(irm|iwr|invoke-restmethod|invoke-webrequest)\b[^|\n]*\|\s*iex\b", "pipe-to-shell"),
     (r"(?i)\brm\s+-rf\s+/(?!tmp)", "destructive command"),
     (r"(?i)\bgit\s+push\s+(--force|-f)\b", "force-push instruction"),
     (r"(?i)without (asking|confirming|telling) (the )?(user|human)", "instruction to bypass the human"),
@@ -678,8 +679,15 @@ def scan_injection(ctx, f, path, text):
     rel = path[len(ctx.prefix):] if ctx.prefix and path.startswith(ctx.prefix) else path
     if any(rel == p or rel.startswith(p) for p in INSTRUCTION_PATHS):
         return  # these files are supposed to instruct agents
+    playbook = rel.startswith("playbooks/")
     for pat, label in INJECTION_PATTERNS:
         m = re.search(pat, text)
+        if m and playbook and label == "pipe-to-shell":
+            # Real installers do this; a playbook records what worked. Replay shows it highlighted.
+            f.add("WARN", "PLAYBOOK-PIPE", path,
+                  "a step pipes a download into a shell: %r" % m.group(0)[:70],
+                  "replay shows this step highlighted and asks before running it")
+            continue
         if m:
             f.add("FAIL", "INJECTION", path,
                   "note contains what reads as an instruction to a future agent (%s): %r"
@@ -1326,6 +1334,288 @@ def check_range_editor(ctx, f, path, text, rng):
               "attribution comes from git; run `stamp` before committing")
 
 
+# --------------------------------------------------------------------------- playbooks
+# A playbook is a finished multi-step task someone did with an AI, written down so a teammate's AI
+# can walk them through it: ordered steps, each with a check, and the problems hit with their fixes.
+# Trust is DERIVED, never stored: an approval is bound to a hash of the steps, and a replay counts
+# only if someone other than the author logged a success against the current steps (ADR-005).
+
+CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+PLAYBOOK_ID_RX = re.compile(r"^PB-[%s]{4}$" % CROCKFORD)
+STEP_HEAD_RX = re.compile(r"^###\s+(\d+)\.\s+(.*?)\s*$")
+STEP_MARK_RX = re.compile(r"\[([A-Za-z]+)\]\s*$")
+STEP_MARKERS = ("check", "local", "external")
+RUN_RX = re.compile(r"^(\d{4}-\d{2}-\d{2}) ([a-z][a-z0-9_-]{0,31}) (success|failed|partial) ([0-9a-f]{8})(?: (.*))?$")
+PLACEHOLDER_LINT = [
+    (r"(?i)\b[a-z]:\\users\\(?!<)[^\\\s<>]+", "a Windows home path"),
+    (r"(?<![\w<])/(?:Users|home)/(?!<)[A-Za-z0-9._-]+", "a home directory path"),
+    (r"(?<!\d)\d{12}(?!\d)", "a 12-digit number (an AWS account id?)"),
+    (r"\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})\b", "a private IP address"),
+]
+STALE_DAYS = 90
+
+
+def is_playbook(ctx, path):
+    rel = path[len(ctx.prefix):] if ctx.prefix and path.startswith(ctx.prefix) else path
+    return rel.startswith("playbooks/") and rel.endswith(".md") and os.path.basename(rel).lower() != "readme.md"
+
+
+def is_runlog(ctx, path):
+    rel = path[len(ctx.prefix):] if ctx.prefix and path.startswith(ctx.prefix) else path
+    return rel.startswith("playbooks/") and rel.endswith(".runs")
+
+
+def section(body, name):
+    """The text of `## name` up to the next `## ` heading (not `###`)."""
+    out, on = [], False
+    for ln in body.split("\n"):
+        if re.match(r"^##\s+", ln) and not ln.startswith("###"):
+            if on:
+                break
+            on = ln[2:].strip().lower() == name.lower()
+            continue
+        if on:
+            out.append(ln)
+    return "\n".join(out) if on or out else None
+
+
+def steps_hash(body):
+    """8 hex characters over the normalised ## Steps section. An approval and a replay are made
+    against this; editing any step changes it, which is what drops stale trust on its own."""
+    sec = section(body, "Steps") or ""
+    lines = [ln.rstrip() for ln in sec.strip("\n").split("\n")]
+    while lines and not lines[0]:
+        lines.pop(0)
+    while lines and not lines[-1]:
+        lines.pop()
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()[:8]
+
+
+def parse_steps(body):
+    """[{n, title, marker, run, check, lines}] from the ## Steps section, in order."""
+    sec = section(body, "Steps")
+    if sec is None:
+        return []
+    steps, cur = [], None
+    for ln in sec.split("\n"):
+        m = STEP_HEAD_RX.match(ln)
+        if m:
+            title = m.group(2)
+            mk = STEP_MARK_RX.search(title)
+            marker = mk.group(1).lower() if mk else None
+            if mk:
+                title = title[:mk.start()].rstrip()
+            cur = {"n": int(m.group(1)), "title": title, "marker": marker, "run": None, "check": None, "lines": []}
+            steps.append(cur)
+            continue
+        if cur is None:
+            continue
+        cur["lines"].append(ln)
+        low = ln.strip().lower()
+        if low.startswith("run:") and cur["run"] is None:
+            cur["run"] = ln.strip()[4:].strip()
+        elif low.startswith("check:") and cur["check"] is None:
+            cur["check"] = ln.strip()[6:].strip()
+    return steps
+
+
+def parse_runs(text):
+    """([run dicts], [bad lines]) from a .runs file."""
+    runs, bad = [], []
+    for ln in (text or "").split("\n"):
+        if not ln.strip():
+            continue
+        m = RUN_RX.match(ln.strip())
+        if not m:
+            bad.append(ln)
+            continue
+        runs.append({"date": m.group(1), "who": m.group(2), "outcome": m.group(3), "steps": m.group(4),
+                     "note": m.group(5) or "", "line": ln.strip()})
+    return runs, bad
+
+
+def approve_level(ctx):
+    """Who may approve a playbook: a maintainer (L1) in a project tier, a steward (L2) in the
+    company tier, unless roles.json `playbooks.approve_level` says otherwise."""
+    cfg = (ctx.policy.get("playbooks") or {}).get("approve_level")
+    return cfg if cfg in LEVEL_ORDER else ("L1" if ctx.prefix else "L2")
+
+
+def person_level(ctx, handle):
+    p = (ctx.policy.get("people") or {}).get(handle)
+    if not isinstance(p, dict):
+        return None
+    return ((ctx.policy.get("roles") or {}).get(p.get("role")) or {}).get("max_level")
+
+
+def playbook_trust(ctx, fm, body, runs, today=None):
+    """{label: approved|reproduced|unreviewed, stale, last_success, successes, runs, steps}."""
+    h = steps_hash(body)
+    author = fm_get(fm or [], "author")
+    by = fm_get(fm or [], "approved_by")
+    approved = bool(by and fm_get(fm or [], "approved_steps") == h
+                    and level_allows(person_level(ctx, by), approve_level(ctx)))
+    good = [r for r in runs if r["outcome"] == "success"]
+    reproduced = any(r["steps"] == h and r["who"] != author for r in good)
+    last = max((r["date"] for r in good), default=None)
+    today = today or datetime.now(timezone.utc).date()
+    stale = False
+    if last:
+        try:
+            stale = (today - datetime.strptime(last, "%Y-%m-%d").date()).days > STALE_DAYS
+        except ValueError:
+            stale = False
+    return {"label": "approved" if approved else "reproduced" if reproduced else "unreviewed",
+            "stale": stale, "last_success": last, "successes": len(good), "runs": len(runs), "steps": h,
+            "failed": sum(1 for r in runs if r["outcome"] == "failed")}
+
+
+def playbook_ids(ctx):
+    """id -> [paths] for every playbook in this tier."""
+    out = {}
+    root = os.path.join(ctx.notes_root, "playbooks")
+    for dirpath, _d, files in os.walk(root):
+        for fn in files:
+            if not fn.endswith(".md") or fn.lower() == "readme.md":
+                continue
+            p = os.path.join(dirpath, fn)
+            try:
+                fm, _b = split_frontmatter(read_text(p))
+            except OSError:
+                continue
+            pid = fm_get(fm or [], "id")
+            if pid:
+                out.setdefault(pid, []).append(os.path.relpath(p, ctx.repo_root).replace(os.sep, "/"))
+    return out
+
+
+def validate_playbook(ctx, f, path, text):
+    fm, body = split_frontmatter(text)
+    fm = fm or []
+    pid = fm_get(fm, "id") or ""
+    if not PLAYBOOK_ID_RX.match(pid):
+        f.add("FAIL", "PLAYBOOK", path, "id %r is not PB- plus 4 Crockford base32 characters" % pid,
+              "`mem playbook save` assigns one, e.g. PB-7K3F")
+    else:
+        homes = playbook_ids(ctx).get(pid, [])
+        if len(homes) > 1:
+            f.add("FAIL", "PLAYBOOK", path, "id %s is used by %d playbooks: %s" % (pid, len(homes), ", ".join(sorted(homes))),
+                  "every playbook in a tier has its own id; `mem playbook save` picks a free one")
+        if not os.path.basename(path).startswith(pid):
+            f.add("WARN", "PLAYBOOK", path, "the file name does not start with its id %s" % pid,
+                  "name it %s-<slug>.md so the run log beside it is easy to find" % pid)
+    if (fm_get(fm, "type") or "") != "playbook":
+        f.add("FAIL", "PLAYBOOK", path, "a note under playbooks/ must have type: playbook", "set type: playbook")
+    steps = parse_steps(body)
+    if not steps:
+        f.add("FAIL", "PLAYBOOK", path, "no steps: a playbook needs a ## Steps section with `### 1. ...` steps",
+              "write the steps that actually worked, in order")
+        return
+    nums = [s_["n"] for s_ in steps]
+    if nums != list(range(1, len(steps) + 1)):
+        f.add("FAIL", "PLAYBOOK", path, "steps are numbered %s, not 1..%d" % (nums, len(steps)),
+              "number the steps 1, 2, 3 ... without gaps")
+    for s_ in steps:
+        if s_["marker"] and s_["marker"] not in STEP_MARKERS:
+            f.add("FAIL", "PLAYBOOK", path, "step %d has marker [%s]; use [check], [local] or [external]" % (s_["n"], s_["marker"]),
+                  "[check] only reads, [local] changes this machine, [external] changes anything shared")
+        if not s_["marker"]:
+            f.add("WARN", "PLAYBOOK", path, "step %d has no marker, so replay treats it as [external]" % s_["n"],
+                  "mark it [check], [local] or [external]")
+        if not s_["check"]:
+            f.add("WARN", "PLAYBOOK", path, "step %d has no `Check:` line" % s_["n"],
+                  "an unverifiable step is where replays go wrong silently; say how to tell it worked")
+    emails = {(p.get("email") or "").lower() for h_, p in (ctx.policy.get("people") or {}).items() if isinstance(p, dict)}
+    for pat, label in PLACEHOLDER_LINT + [(r"[\w.+-]+@[\w-]+\.[\w.-]+", "an email address")]:
+        for m in re.finditer(pat, body):
+            if label == "an email address" and m.group(0).lower() in emails:
+                continue
+            if label == "an email address" and m.group(0).lower().endswith(("example.com", "example.test", "example.org")):
+                continue
+            f.add("WARN", "PLAYBOOK-PLACEHOLDER", path, "%s: %r" % (label, m.group(0)[:60]),
+                  "replace machine- or person-specific values with a placeholder like <YOUR_VALUE>")
+            break
+
+
+def _approval(fm):
+    return (fm_get(fm or [], "approved_by") or "", fm_get(fm or [], "approved_steps") or "")
+
+
+def check_playbook_approval(ctx, f, path, text, base_ref, rng):
+    """approved_by / approved_steps may be added or changed only by a person (never an agent) whose
+    level reaches approve_level, and approved_by must be that person. Removing an approval is free."""
+    fm, body = split_frontmatter(text)
+    new = _approval(fm)
+    old = ("", "")
+    if base_ref and exists_at(ctx, base_ref, path):
+        ofm, _ob = split_frontmatter(git("-C", ctx.repo_root, "show", "%s:%s" % (base_ref, path)))
+        old = _approval(ofm)
+    if new == old or not (new[0] or new[1]):
+        return
+    need = approve_level(ctx)
+    if rng:
+        emails = git("-C", ctx.repo_root, "log", "-1", "--format=%ae", rng, "--", path).split()
+        who, kind = (handle_for_email(ctx, emails[0]) if emails else None), "human"
+        trailer = git("-C", ctx.repo_root, "log", "-1", "--format=%B", rng, "--", path)
+        if re.search(r"(?m)^Sync-Actor:\s*agent\b", trailer):
+            kind = "agent"
+    else:
+        who, kind = ctx.handle, ctx.actor_kind
+    if kind != "human":
+        f.add("FAIL", "PLAYBOOK-APPROVAL", path, "an agent set approved_by/approved_steps",
+              "only a person approves a playbook, by running `mem playbook approve` themselves")
+        return
+    if new[0] != (who or ""):
+        f.add("FAIL", "PLAYBOOK-APPROVAL", path, "approved_by=%r but the change is by %r" % (new[0], who),
+              "an approval names the person who gives it; nobody approves for someone else")
+        return
+    if not level_allows(person_level(ctx, who), need):
+        f.add("FAIL", "PLAYBOOK-APPROVAL", path, "%s cannot approve: approving needs %s" % (who, need),
+              "ask a %s to review and approve it" % ("maintainer" if need == "L1" else "steward"))
+        return
+    if new[1] != steps_hash(body):
+        f.add("FAIL", "PLAYBOOK-APPROVAL", path, "approved_steps=%r does not match the current steps (%s)" % (new[1], steps_hash(body)),
+              "run `mem playbook approve` after the last edit to the steps")
+
+
+def check_runlog(ctx, f, path, base_ref, rng):
+    """A .runs file is append-only, every line parses, and each NEW line names whoever committed it:
+    the committing identity locally, each commit's author in a range. No one logs a run for someone else."""
+    abs_path = os.path.join(ctx.repo_root, path)
+    cur = read_text(abs_path) if os.path.isfile(abs_path) else ""
+    base = git("-C", ctx.repo_root, "show", "%s:%s" % (base_ref, path)) if base_ref and exists_at(ctx, base_ref, path) else ""
+    runs, bad = parse_runs(cur)
+    for ln in bad[:3]:
+        f.add("FAIL", "PLAYBOOK-RUNS", path, "not a run record: %r" % ln[:80],
+              "one line per run: YYYY-MM-DD <handle> success|failed|partial <steps hash> <note>; `mem playbook log` writes it")
+    have = collections.Counter(r["line"] for r in runs)
+    base_runs, _b = parse_runs(base)
+    missing = collections.Counter(r["line"] for r in base_runs) - have
+    if missing:
+        f.add("FAIL", "PLAYBOOK-RUNS", path, "%d earlier run record(s) were removed or edited" % sum(missing.values()),
+              "run logs are append-only; failed runs are the most useful warnings")
+    if not rng:
+        added = have - collections.Counter(r["line"] for r in base_runs)
+        for line in added:
+            who = line.split(" ")[1]
+            if ctx.actor_kind != "bot" and who != ctx.handle:
+                f.add("FAIL", "PLAYBOOK-RUNS", path, "a new run is logged for %r by %r" % (who, ctx.handle),
+                      "log only your own runs; `mem playbook log` fills in your handle")
+        return
+    commits = git("-C", ctx.repo_root, "log", "--no-merges", "--format=%H %ae", rng, "--", path).split("\n")
+    for row in commits:
+        if not row.strip():
+            continue
+        sha_, email = row.split(" ", 1)
+        who = handle_for_email(ctx, email)
+        after, _x = parse_runs(git("-C", ctx.repo_root, "show", "%s:%s" % (sha_, path)))
+        before, _y = parse_runs(git("-C", ctx.repo_root, "show", "%s^:%s" % (sha_, path)) if exists_at(ctx, sha_ + "^", path) else "")
+        for line in collections.Counter(r["line"] for r in after) - collections.Counter(r["line"] for r in before):
+            if line.split(" ")[1] != who:
+                f.add("FAIL", "PLAYBOOK-RUNS", path, "commit %s by %r logs a run for %r" % (sha_[:7], who, line.split(" ")[1]),
+                      "log only your own runs")
+
+
 def cmd_classify(ctx, args):
     """Print the highest level this change needs, judged by the trusted policy plus the protected
     floor, counting both sides of every rename. CI routes review on this; the old inline classifier
@@ -1575,6 +1865,9 @@ def cmd_check(ctx, args):
                       "ask that project's maintainer to promote it")
 
         if status == "D":
+            if is_runlog(ctx, path):
+                f.add("FAIL", "PLAYBOOK-RUNS", path, "a run log was deleted",
+                      "run logs are append-only; failed runs are the most useful warnings")
             continue
         abs_path = os.path.join(ctx.repo_root, path)
         if not os.path.isfile(abs_path):
@@ -1598,6 +1891,11 @@ def cmd_check(ctx, args):
                 check_range_editor(ctx, f, path, text, args.range)
             if status == "A" and rel.startswith("log/journal/"):
                 check_duplicate(ctx, f, path, text)
+            if is_playbook(ctx, path):
+                validate_playbook(ctx, f, path, text)
+                check_playbook_approval(ctx, f, path, text, base_ref, args.range)
+        elif is_runlog(ctx, path):
+            check_runlog(ctx, f, path, base_ref, args.range)
 
     # --- write-back: code a feature covers changed, its note did not ------
     # This is what keeps the feature spine alive. Every wiki's component page rots the same way:
@@ -1777,8 +2075,9 @@ def cmd_significance(ctx, args):
     )
     if not os.path.isabs(marker):
         marker = os.path.join(ctx.repo_root, marker)
+    playbook_offer = playbook_suggestion(ctx, hook, marker + "-playbook")
     if os.path.exists(marker):
-        return EXIT_OK  # already nudged once this session
+        return emit_significance(args, playbook_offer) if playbook_offer else EXIT_OK
 
     # Did the agent already record something? Then we are done.
     wrote_memory = False
@@ -1788,7 +2087,7 @@ def cmd_significance(ctx, args):
             wrote_memory = True
             break
     if wrote_memory:
-        return EXIT_OK
+        return emit_significance(args, playbook_offer) if playbook_offer else EXIT_OK
 
     # Markers in the working tree of the repo the agent is actually working in.
     work_repo = hook.get("cwd") or ctx.repo_root
@@ -1811,7 +2110,7 @@ def cmd_significance(ctx, args):
             break
 
     if not reasons:
-        return EXIT_OK
+        return emit_significance(args, playbook_offer) if playbook_offer else EXIT_OK
 
     try:
         with open(marker, "w", encoding="utf-8") as fh:
@@ -1831,6 +2130,10 @@ def cmd_significance(ctx, args):
         "  - Nothing durable (progress narration, anything re-derivable from the diff) -> say "
         "'nothing durable to store' and stop. That is a valid answer and often the right one."
     ) % ctx.project_name
+    return emit_significance(args, reason + (("\n" + playbook_offer) if playbook_offer else ""))
+
+
+def emit_significance(args, reason):
     fmt = getattr(args, "format", "claude")
     if fmt == "claude":
         # Claude Code reads a JSON decision on stdout; `block` feeds `reason` back to the agent
@@ -1841,6 +2144,41 @@ def cmd_significance(ctx, args):
         # agent's context, so the same text arrives as a nudge rather than an instruction.
         print(reason)
     return EXIT_OK
+
+
+PLAYBOOK_SHELL_STEPS = 8
+SHELL_TOOL_RX = re.compile(r'"name"\s*:\s*"(Bash|PowerShell|shell|run_terminal_cmd|executeBash)"')
+
+
+def playbook_suggestion(ctx, hook, marker):
+    """Once per session, after a turn that ran many shell commands and saved no playbook: tell the
+    agent to OFFER /playbook-save to the person. It counts tool calls in the host's transcript file;
+    nothing from the transcript is read beyond that count or kept."""
+    if os.path.exists(marker):
+        return None
+    path = hook.get("transcript_path") or ""
+    n = 0
+    try:
+        if path and os.path.isfile(path):
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    n += len(SHELL_TOOL_RX.findall(line))
+    except OSError:
+        return None
+    if n < PLAYBOOK_SHELL_STEPS:
+        return None
+    for _s, p in changed_files(ctx, staged=False):
+        rel = p[len(ctx.prefix):] if ctx.prefix and p.startswith(ctx.prefix) else p
+        if rel.startswith("playbooks/"):
+            return None
+    try:
+        with open(marker, "w", encoding="utf-8") as fh:
+            fh.write(datetime.now(timezone.utc).isoformat())
+    except OSError:
+        pass
+    return ("This session ran %d shell commands. If it was a multi-step setup or task someone else will "
+            "repeat, ask the person once: \"Save this as a playbook so a teammate's AI can walk them "
+            "through it? (/playbook-save)\". Do not save it without their yes; if they decline, stop." % n)
 
 
 def cmd_explain(ctx, args):

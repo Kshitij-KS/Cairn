@@ -184,7 +184,7 @@ def main():
             ok("negative: verify FAILS on a leaked %s" % name, rc == 1, out.strip().splitlines()[-1] if out.strip() else "")
         p = os.path.join(tmp, "dupkey.json")
         raw_pub = open(pub_path).read()
-        open(p, "w").write(raw_pub.replace('"schema": 3,', '"schema": 3, "schema": 3,', 1))
+        open(p, "w").write(raw_pub.replace('"schema": 4,', '"schema": 4, "schema": 4,', 1))
         rc, out = sh(root, sys.executable, ATLAS, "--verify", p)
         ok("negative: verify FAILS on a duplicate JSON key", rc == 1, out.strip()[-80:])
         d = copy.deepcopy(pub)

@@ -4,7 +4,7 @@ set -u
 cd "$(dirname "$0")/.."
 PY="${PYTHON:-python3}"; command -v "$PY" >/dev/null 2>&1 || PY=py
 fail=0
-for t in tools/test_parsers.py tools/test_guard.py tools/test_security.py tools/test_mem.py tools/test_atlas.py tools/test_gate.py tools/test_sync.py tools/test_init.py tools/test_scaffold.py; do
+for t in tools/test_parsers.py tools/test_guard.py tools/test_security.py tools/test_mem.py tools/test_atlas.py tools/test_gate.py tools/test_sync.py tools/test_init.py tools/test_scaffold.py tools/test_playbooks.py; do
   printf '\n=== %s\n' "$t"
   out="$("$PY" "$t" 2>&1)"; rc=$?
   printf '%s\n' "$out" | tail -1

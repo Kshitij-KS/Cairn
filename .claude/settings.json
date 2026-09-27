@@ -73,6 +73,15 @@
         "hooks": [
           {
             "type": "command",
+            "command": "uv run -q --script scripts/mem.py --hook prompt",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
             "command": "uv run -q --script scripts/mem.py --hook moved --quiet --fetch --throttle 300",
             "timeout": 30
           }

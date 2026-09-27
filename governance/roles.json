@@ -27,6 +27,7 @@
       "paths": [
         "log/journal/**",
         "projects/**",
+        "playbooks/**",
         "trials/**",
         "evals/**"
       ],
@@ -308,6 +309,11 @@
         "reason": "the feature spine agents navigate by: what each part is, owns and promises"
       },
       {
+        "glob": "playbooks/**",
+        "level": "L0",
+        "reason": "playbooks and their run logs: anyone saves one and logs their own runs; trust is earned by replays and a person's approval, both checked by the guard"
+      },
+      {
         "glob": "trials/**",
         "level": "L0",
         "reason": "anyone may open a trial; KEEPING one is governed by the level of what it changes"
@@ -426,6 +432,8 @@
     "$comment_extra_symptoms": "Regular expressions for how bug reports in YOUR domain describe a symptom, added to mem.py's generic list (has no, missing, wrong, stuck, times out, too slow, ...). An ask with no intent word that matches one is read as debug. Example for a web app: [\"\\\\bspins forever\\\\b\", \"\\\\b404\\\\b\", \"\\\\blogged out\\\\b\"].",
     "ask_on_guess": true,
     "$comment_ask_on_guess": "When mem load cannot tell the kind of task (no intent word, no symptom) or the feature, it asks the person with ranked options instead of loading a guess. false: load the best guess and mark it A GUESS in the receipt.",
+    "load_on_first_prompt": true,
+    "$comment_load_on_first_prompt": "Claude Code's UserPromptSubmit hook runs mem load for the first message of each session and adds the receipt (or its question) to the agent's context, so context arrives even if the agent forgets the entry protocol. false: the agent's own mem load is the only trigger.",
     "code_root": ".",
     "$comment_code_root": "where features' covers: globs resolve, relative to the repo root. '.' = this repo (cairn's features cover its own scripts). MEMORY_CODE_ROOT overrides it."
   },
@@ -478,5 +486,9 @@
     "duplicate_lookback_days": 30
   },
   "instance": false,
-  "$comment_instance": "false in the Cairn template. `scripts/init.py` fills in the owner and sets this true; the memory-gate, cascade, changelog and atlas workflows only run on an initialized instance."
+  "$comment_instance": "false in the Cairn template. `scripts/init.py` fills in the owner and sets this true; the memory-gate, cascade, changelog and atlas workflows only run on an initialized instance.",
+  "playbooks": {
+    "$comment": "Who may approve a playbook (approved_by / approved_steps, checked by the guard). Unset: L1 (a maintainer) in a project tier, L2 (a steward) in the company tier. Agents never approve.",
+    "approve_level": null
+  }
 }

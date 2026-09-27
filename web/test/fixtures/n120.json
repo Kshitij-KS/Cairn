@@ -1,10 +1,10 @@
 {
- "schema": 3,
+ "schema": 4,
  "mode": "public",
  "project": "cairn",
- "generated_at": "2026-09-27T19:57:22Z",
- "source_commit": "e716beb",
- "source_commit_at": "2026-09-27T19:57:21Z",
+ "generated_at": "2026-09-27T20:24:52Z",
+ "source_commit": "2c5a468",
+ "source_commit_at": "2026-09-27T20:24:52Z",
  "repo_url": null,
  "levels": {
   "L0": {
@@ -13,6 +13,7 @@
    "paths": [
     "log/journal/**",
     "projects/**",
+    "playbooks/**",
     "trials/**",
     "evals/**"
    ],
@@ -85,21 +86,22 @@
  },
  "withheld": {
   "restricted": 0,
-  "bodies": 129,
-  "briefs": 42,
+  "bodies": 131,
+  "briefs": 43,
   "experiments": 0
  },
  "stats": {
-  "notes": 129,
-  "observations": 834,
-  "relations": 252,
+  "notes": 131,
+  "observations": 841,
+  "relations": 257,
   "dependencies": 130,
   "authors": 0,
   "commits": 1,
   "claims": 120,
   "features": 6,
   "gaps": 0,
-  "live_trials": 0
+  "live_trials": 0,
+  "playbooks": 0
  },
  "features": [
   {
@@ -203,6 +205,7 @@
  ],
  "gaps": [],
  "trials": [],
+ "playbooks": [],
  "sessions": [],
  "nodes": [
   {
@@ -1073,6 +1076,38 @@
    "body": null,
    "observation_list": null,
    "claims": 5
+  },
+  {
+   "id": "decisions/ADR-005-playbooks",
+   "path": "decisions/ADR-005-playbooks.md",
+   "title": "ADR-005 Playbooks",
+   "folder": "decisions",
+   "type": "decision",
+   "level": "L2",
+   "confidentiality": "internal",
+   "author": null,
+   "updated_by": null,
+   "agent": null,
+   "status": "proposed",
+   "created": "2026-09-28",
+   "updated": "2026-09-28",
+   "age_days": 0,
+   "tags": [
+    "adr",
+    "playbooks",
+    "trust"
+   ],
+   "observations": 4,
+   "categories": {
+    "decision": 3,
+    "risk": 1
+   },
+   "todos": 0,
+   "review_needed": null,
+   "brief": null,
+   "body": null,
+   "observation_list": null,
+   "claims": 0
   },
   {
    "id": "decisions/README",
@@ -4428,6 +4463,36 @@
     "card": null,
     "contract": null
    }
+  },
+  {
+   "id": "playbooks/README",
+   "path": "playbooks/README.md",
+   "title": "Playbooks Index",
+   "folder": "playbooks",
+   "type": "process",
+   "level": "L0",
+   "confidentiality": "internal",
+   "author": null,
+   "updated_by": null,
+   "agent": null,
+   "status": null,
+   "created": "2026-09-28",
+   "updated": "2026-09-28",
+   "age_days": 0,
+   "tags": [
+    "playbooks",
+    "process"
+   ],
+   "observations": 3,
+   "categories": {
+    "rule": 3
+   },
+   "todos": 0,
+   "review_needed": null,
+   "brief": "A playbook is a multi-step setup or task someone completed with an AI, written down so a teammate's AI can walk them through it: the steps that worked, each…",
+   "body": null,
+   "observation_list": null,
+   "claims": 0
   }
  ],
  "edges": [
@@ -4758,6 +4823,24 @@
   {
    "source": "decisions/ADR-004-context-protocol",
    "target": "decisions/ADR-003-claims-recall-and-trials",
+   "type": "relates_to",
+   "dependency": false
+  },
+  {
+   "source": "decisions/ADR-005-playbooks",
+   "target": "CORE",
+   "type": "relates_to",
+   "dependency": false
+  },
+  {
+   "source": "decisions/ADR-005-playbooks",
+   "target": "decisions/ADR-004-context-protocol",
+   "type": "relates_to",
+   "dependency": false
+  },
+  {
+   "source": "decisions/ADR-005-playbooks",
+   "target": "decisions/ADR-002-memory-governance-and-access-tiers",
    "type": "relates_to",
    "dependency": false
   },
@@ -5942,6 +6025,18 @@
    "target": "CORE",
    "type": "part_of",
    "dependency": true
+  },
+  {
+   "source": "playbooks/README",
+   "target": "decisions/ADR-005-playbooks",
+   "type": "relates_to",
+   "dependency": false
+  },
+  {
+   "source": "playbooks/README",
+   "target": "CORE",
+   "type": "relates_to",
+   "dependency": false
   }
  ],
  "arrangements": {
@@ -5983,8 +6078,8 @@
        0.0292
       ]
      },
-     "x": 314.22,
-     "y": -199.44,
+     "x": 244.09,
+     "y": -191.99,
      "r": 111.55,
      "sample": [
       [
@@ -6104,8 +6199,8 @@
        0.4915
       ]
      },
-     "x": -506.65,
-     "y": 36.31,
+     "x": -441.97,
+     "y": 77.67,
      "r": 159.1,
      "sample": [
       [
@@ -6218,127 +6313,136 @@
     {
      "id": "area:decisions",
      "label": "Decisions",
-     "count": 12,
+     "count": 13,
      "levels": {
-      "L2": 12
+      "L2": 13
      },
-     "observations": 95,
+     "observations": 99,
      "review_needed": 0,
      "todos": 0,
      "newest_days": 0,
      "oldest_days": 258,
      "pos": {
       "decisions/ADR-000-template": [
-       0.068,
-       -0.041
+       0.119,
+       -0.2302
       ],
       "decisions/ADR-001-shared-memory-system": [
-       -0.1974,
-       0.2089
+       -0.1142,
+       0.0713
       ],
       "decisions/ADR-002-memory-governance-and-access-tiers": [
-       0.0143,
-       -0.4888
+       -0.0124,
+       -0.6861
       ],
       "decisions/ADR-003-claims-recall-and-trials": [
-       0.147,
-       0.3329
+       0.2131,
+       0.2586
       ],
       "decisions/ADR-004-context-protocol": [
-       -0.3998,
-       -0.1462
+       -0.2781,
+       -0.284
+      ],
+      "decisions/ADR-005-playbooks": [
+       0.4787,
+       -0.0425
       ],
       "decisions/README": [
-       0.3959,
-       -0.2469
+       -0.2142,
+       0.7716
       ],
       "decisions/api-slow-query-on-the-changes-feed-003": [
-       -0.1734,
-       0.6426
+       -0.5474,
+       -0.6777
       ],
       "decisions/auth-retry-storm-on-timeout-005": [
-       -0.4909,
-       -0.6018
+       0.6714,
+       0.3861
       ],
       "decisions/checkout-rate-limit-hit-on-the-export-API-000": [
-       0.5707,
-       0.1682
+       -0.4862,
+       0.3383
       ],
       "decisions/onboarding-cascade-stamps-too-widely-004": [
-       -0.6374,
-       0.2548
+       0.4971,
+       -0.5135
       ],
       "decisions/search-cascade-stamps-too-widely-002": [
-       0.4959,
-       -0.6902
+       0.2551,
+       0.7281
       ],
       "decisions/sync-slow-query-on-the-changes-feed-001": [
-       0.32,
-       0.7455
+       -0.7293,
+       -0.1333
       ]
      },
-     "x": -174.51,
-     "y": -388.51,
-     "r": 145.01,
+     "x": 11.79,
+     "y": -432.99,
+     "r": 148.22,
      "sample": [
       [
-       0.068,
-       -0.041,
+       0.119,
+       -0.23,
        2
       ],
       [
-       -0.197,
-       0.209,
+       -0.114,
+       0.071,
        2
       ],
       [
-       0.014,
-       -0.489,
+       -0.012,
+       -0.686,
        2
       ],
       [
-       0.147,
-       0.333,
+       0.213,
+       0.259,
        2
       ],
       [
-       -0.4,
-       -0.146,
+       -0.278,
+       -0.284,
        2
       ],
       [
-       0.396,
-       -0.247,
+       0.479,
+       -0.043,
        2
       ],
       [
-       -0.173,
-       0.643,
+       -0.214,
+       0.772,
        2
       ],
       [
-       -0.491,
-       -0.602,
+       -0.547,
+       -0.678,
        2
       ],
       [
-       0.571,
-       0.168,
+       0.671,
+       0.386,
        2
       ],
       [
-       -0.637,
+       -0.486,
+       0.338,
+       2
+      ],
+      [
+       0.497,
+       -0.513,
+       2
+      ],
+      [
        0.255,
+       0.728,
        2
       ],
       [
-       0.496,
-       -0.69,
-       2
-      ],
-      [
-       0.32,
-       0.746,
+       -0.729,
+       -0.133,
        2
       ]
      ],
@@ -6348,6 +6452,7 @@
       "decisions/ADR-002-memory-governance-and-access-tiers",
       "decisions/ADR-003-claims-recall-and-trials",
       "decisions/ADR-004-context-protocol",
+      "decisions/ADR-005-playbooks",
       "decisions/README",
       "decisions/api-slow-query-on-the-changes-feed-003",
       "decisions/auth-retry-storm-on-timeout-005",
@@ -6416,8 +6521,8 @@
        -0.7292
       ]
      },
-     "x": 249.98,
-     "y": 334.22,
+     "x": 295.85,
+     "y": 333.83,
      "r": 141.55,
      "sample": [
       [
@@ -6509,8 +6614,8 @@
        0.0
       ]
      },
-     "x": 335.31,
-     "y": 56.31,
+     "x": 343.51,
+     "y": 45.68,
      "r": 74.49,
      "sample": [
       [
@@ -6554,8 +6659,8 @@
        0.7329
       ]
      },
-     "x": 91.64,
-     "y": 64.19,
+     "x": 104.21,
+     "y": 89.49,
      "r": 103.66,
      "sample": [
       [
@@ -6599,8 +6704,8 @@
      "todos": 0,
      "newest_days": 0,
      "oldest_days": 262,
-     "x": -181.81,
-     "y": 348.94,
+     "x": -130.98,
+     "y": 404.97,
      "r": 219.1,
      "sample": [
       [
@@ -7902,8 +8007,8 @@
        0.4369
       ]
      },
-     "x": 54.36,
-     "y": -195.2,
+     "x": -11.95,
+     "y": -141.31,
      "r": 81.55,
      "sample": [
       [
@@ -7961,8 +8066,8 @@
        -0.4527
       ]
      },
-     "x": -179.54,
-     "y": -56.55,
+     "x": -271.19,
+     "y": -227.96,
      "r": 118.22,
      "sample": [
       [
@@ -8005,13 +8110,46 @@
       "features/project-scaffolding"
      ],
      "children": []
+    },
+    {
+     "id": "area:playbooks",
+     "label": "Playbooks",
+     "count": 1,
+     "levels": {
+      "L0": 1
+     },
+     "observations": 3,
+     "review_needed": 0,
+     "todos": 0,
+     "newest_days": 0,
+     "oldest_days": 0,
+     "pos": {
+      "playbooks/README": [
+       0.84,
+       0.0
+      ]
+     },
+     "x": -145.03,
+     "y": 44.8,
+     "r": 74.49,
+     "sample": [
+      [
+       0.84,
+       0.0,
+       0
+      ]
+     ],
+     "members": [
+      "playbooks/README"
+     ],
+     "children": []
     }
    ],
    "edges": [
     {
      "source": "area:decisions",
      "target": "overview",
-     "weight": 11,
+     "weight": 12,
      "dependency": 1
     },
     {
@@ -8111,8 +8249,20 @@
      "dependency": 0
     },
     {
+     "source": "area:decisions",
+     "target": "area:playbooks",
+     "weight": 1,
+     "dependency": 0
+    },
+    {
      "source": "area:governance",
      "target": "area:log/journal",
+     "weight": 1,
+     "dependency": 0
+    },
+    {
+     "source": "area:playbooks",
+     "target": "overview",
      "weight": 1,
      "dependency": 0
     },
@@ -8131,210 +8281,220 @@
     {
      "id": "time:2026-09",
      "label": "Sep 2026",
-     "count": 38,
+     "count": 40,
      "levels": {
-      "L2": 18,
+      "L2": 19,
       "L3": 3,
-      "L0": 11,
+      "L0": 12,
       "L1": 6
      },
-     "observations": 188,
+     "observations": 195,
      "review_needed": 0,
      "todos": 14,
      "newest_days": 0,
      "oldest_days": 23,
-     "r": 192.56,
-     "x": 1412.13,
-     "y": -13.11,
+     "r": 194.73,
+     "x": 1413.45,
+     "y": -13.79,
      "sample": [
       [
        0.54,
-       -0.116,
+       -0.104,
        2
       ],
       [
        0.499,
-       -0.049,
+       -0.037,
        3
       ],
       [
        0.288,
-       0.039,
+       0.051,
        2
       ],
       [
        0.422,
-       -0.322,
+       -0.31,
        2
       ],
       [
        0.467,
-       -0.283,
+       -0.271,
        2
       ],
       [
        0.472,
-       -0.099,
+       -0.087,
        2
       ],
       [
        0.581,
-       -0.042,
+       -0.031,
        2
       ],
       [
        0.434,
-       -0.18,
+       -0.168,
        2
       ],
       [
        0.65,
-       -0.18,
+       -0.168,
        2
       ],
       [
        0.38,
-       0.039,
+       0.051,
        2
       ],
       [
        0.568,
-       -0.292,
+       -0.28,
        2
       ],
       [
        0.376,
-       0.129,
+       0.14,
        2
       ],
       [
        0.242,
-       -0.243,
+       -0.231,
        2
       ],
       [
        0.661,
-       -0.287,
+       -0.275,
        2
       ],
       [
        0.416,
-       -0.05,
+       -0.038,
        2
       ],
       [
        0.366,
-       -0.258,
+       -0.246,
        2
       ],
       [
        0.464,
-       0.091,
+       0.103,
        2
       ],
       [
        0.251,
-       -0.055,
+       -0.044,
        2
       ],
       [
        0.502,
-       -0.358,
+       -0.346,
        2
       ],
       [
        0.53,
-       0.027,
+       0.039,
        0
       ],
       [
        0.272,
-       -0.334,
+       -0.323,
        0
       ],
       [
        0.692,
-       -0.066,
+       -0.054,
        0
       ],
       [
        0.148,
-       -0.196,
+       -0.185,
        0
       ],
       [
        0.366,
-       -0.403,
+       -0.391,
        3
       ],
       [
        0.53,
-       -0.193,
+       -0.182,
        3
       ],
       [
        0.455,
-       0.001,
+       0.013,
        1
       ],
       [
        0.357,
-       -0.129,
+       -0.117,
        1
       ],
       [
        0.172,
-       -0.037,
+       -0.025,
        1
       ],
       [
        0.271,
-       -0.17,
+       -0.158,
        1
       ],
       [
        0.334,
-       -0.036,
+       -0.024,
        1
       ],
       [
        0.185,
-       -0.115,
+       -0.103,
        1
       ],
       [
-       -0.141,
-       -0.417,
+       0.014,
+       -0.44,
+       2
+      ],
+      [
+       -0.172,
+       -0.344,
        0
       ],
       [
-       -0.35,
-       -0.309,
+       0.19,
+       0.417,
+       0
+      ],
+      [
+       -0.02,
+       0.524,
        0
       ],
       [
        -0.347,
-       0.172,
+       0.287,
        0
       ],
       [
        -0.506,
-       0.254,
+       0.369,
        0
       ],
       [
        -0.403,
-       0.017,
+       0.131,
        0
       ],
       [
        -0.304,
-       0.319,
+       0.434,
        0
       ],
       [
-       0.181,
-       0.417,
+       -0.319,
+       -0.153,
        0
       ]
      ],
@@ -8481,8 +8641,8 @@
          0.0587
         ]
        },
-       "x": 208.73,
-       "y": -67.72,
+       "x": 212.56,
+       "y": -62.96,
        "r": 150.88,
        "sample": [
         [
@@ -8677,6 +8837,50 @@
        "children": []
       },
       {
+       "id": "week:2026-09-28",
+       "label": "Week of 28 Sep",
+       "count": 2,
+       "levels": {
+        "L2": 1,
+        "L0": 1
+       },
+       "observations": 7,
+       "review_needed": 0,
+       "todos": 0,
+       "newest_days": 0,
+       "oldest_days": 0,
+       "pos": {
+        "decisions/ADR-005-playbooks": [
+         0.5792,
+         -0.1553
+        ],
+        "playbooks/README": [
+         -0.656,
+         0.4793
+        ]
+       },
+       "x": -33.28,
+       "y": -188.42,
+       "r": 66.87,
+       "sample": [
+        [
+         0.579,
+         -0.155,
+         2
+        ],
+        [
+         -0.656,
+         0.479,
+         0
+        ]
+       ],
+       "members": [
+        "decisions/ADR-005-playbooks",
+        "playbooks/README"
+       ],
+       "children": []
+      },
+      {
        "id": "week:2026-08-31",
        "label": "Week of 31 Aug",
        "count": 2,
@@ -8698,8 +8902,8 @@
          0.7138
         ]
        },
-       "x": -61.08,
-       "y": -109.18,
+       "x": 34.1,
+       "y": 145.47,
        "r": 66.87,
        "sample": [
         [
@@ -8749,8 +8953,8 @@
          0.7665
         ]
        },
-       "x": -168.15,
-       "y": 69.61,
+       "x": -175.21,
+       "y": 120.6,
        "r": 85.0,
        "sample": [
         [
@@ -8800,8 +9004,8 @@
          0.0
         ]
        },
-       "x": 21.54,
-       "y": 107.98,
+       "x": -39.06,
+       "y": -14.35,
        "r": 52.48,
        "sample": [
         [
@@ -8877,8 +9081,8 @@
       ]
      },
      "r": 141.55,
-     "x": -419.08,
-     "y": 172.24,
+     "x": -420.41,
+     "y": 172.61,
      "sample": [
       [
        0.635,
@@ -9011,8 +9215,8 @@
       ]
      },
      "r": 141.55,
-     "x": 335.68,
-     "y": -88.84,
+     "x": 334.36,
+     "y": -88.59,
      "sample": [
       [
        0.223,
@@ -9137,8 +9341,8 @@
       ]
      },
      "r": 133.66,
-     "x": -1080.97,
-     "y": 163.84,
+     "x": -1082.29,
+     "y": 163.86,
      "sample": [
       [
        0.243,
@@ -9263,8 +9467,8 @@
       ]
      },
      "r": 145.01,
-     "x": 685.29,
-     "y": -215.8,
+     "x": 683.96,
+     "y": -216.1,
      "sample": [
       [
        0.272,
@@ -9399,7 +9603,7 @@
       ]
      },
      "r": 137.78,
-     "x": -1412.13,
+     "x": -1413.45,
      "y": -46.85,
      "sample": [
       [
@@ -9515,8 +9719,8 @@
       ]
      },
      "r": 129.1,
-     "x": 1019.7,
-     "y": -52.14,
+     "x": 1018.38,
+     "y": -52.97,
      "sample": [
       [
        0.076,
@@ -9671,8 +9875,8 @@
       ]
      },
      "r": 167.78,
-     "x": -41.7,
-     "y": -67.15,
+     "x": -43.02,
+     "y": -66.65,
      "sample": [
       [
        0.195,
@@ -9857,8 +10061,8 @@
       ]
      },
      "r": 133.66,
-     "x": -754.84,
-     "y": 123.9,
+     "x": -756.16,
+     "y": 124.05,
      "sample": [
       [
        0.117,
@@ -10131,13 +10335,13 @@
  },
  "activity": [
   {
-   "sha": "e716beb4",
+   "sha": "2c5a468a",
    "author": "Cairn",
-   "at": "2026-09-28T01:27:21",
+   "at": "2026-09-28T01:54:52",
    "level": "L3",
    "actor": "human",
    "agent": null,
-   "files": 210,
+   "files": 220,
    "paths": [
     ".agents/skills/team-memory/SKILL.md",
     ".basic-memory/README.md",

@@ -489,7 +489,7 @@ tests the dispatcher's implementation for the platform by default; `--impl all` 
 
 ### 4.5 Memory Atlas
 
-`scripts/build_atlas.py` builds `web/data/graph.json` (schema 3); `web/` renders it (vanilla JS +
+`scripts/build_atlas.py` builds `web/data/graph.json` (schema 4: schema 3 plus a `playbooks` array with derived trust and counts only); `web/` renders it (vanilla JS +
 d3, layout precomputed in Python, no layout in the browser).
 
 - **Public build** (default): restricted notes omitted, and so is **every trace of them**: links to
@@ -548,6 +548,53 @@ Claude Code behaviour above was checked against the current docs on 2026-09-23 (
 matchers including `compact`, plain stdout added to context for SessionStart and
 UserPromptSubmit, `.claude/commands/` still supported, `CLAUDE_CODE_SESSION_ID` from CLI 2.1.132)
 through a documentation lookup, not by running Claude Code.
+
+### 4.9 Playbooks (ADR-005)
+
+A playbook is `playbooks/PB-XXXX-<slug>.md` (type `playbook`, L0) with `## Before you start`,
+`## Steps` (`### N. title [check|local|external]`, each with `Run:` and `Check:`), `## Caveats`
+(`- [blocker|fix|warning] (step N) text`), `## Verify`; its run log is `PB-XXXX-<slug>.runs`, one
+line per run: `YYYY-MM-DD <handle> success|failed|partial <steps hash> <note>`, merged with git's
+`union` driver (`.gitattributes`).
+
+- **Guard** (`validate_playbook`, `check_playbook_approval`, `check_runlog`; staged and range
+  mode): id `PB-` + 4 Crockford base32, unique in the tier; steps numbered 1..N; known markers;
+  a step without `Check:` or a marker is a warning; home paths, 12-digit numbers, private IPs and
+  unknown emails are warnings (placeholders); pipe-to-shell is a warning in a playbook and
+  highlighted at replay, other injection patterns still fail; run logs are append-only (removal,
+  edit or deletion fails) and every new line names the committing person (per commit in a range);
+  `approved_by` / `approved_steps` may be set only by a person (never an agent, including a commit
+  with `Sync-Actor: agent`) whose level reaches `approve_level` (L1 project tier, L2 company tier),
+  naming themselves, against the current steps hash.
+- **Trust** (`playbook_trust`, shared by the guard, `mem` and the Atlas): `approved` if the
+  approval is valid for the current `steps_hash`; else `reproduced` if someone other than the
+  author logged a success against it; else `unreviewed`; `stale` when the last success is over 90
+  days old.
+- **`mem playbook`**: `save` (validates exactly as the guard will, assigns an id, exit 2 on a
+  similar playbook with `--update`/`--new`, exit 3 on a secret, exit 5 on a bad draft), `find`
+  (title > tags > steps > caveats, typo tolerant, `--regex` with a length cap, `--tag`, both
+  tiers), `show`, `run` (a guided-run bundle: banner, trust, environment mismatch, placeholders
+  with `--set` remembered per machine, each caveat before its step, ask-first labels, pipe-to-shell
+  highlighted), `log`, `caveat`, `approve`, `stats` (the ADR-005 target), `begin`/`since`,
+  `export` (a checklist), `list`. `mem` never executes playbook content.
+- **Tiers:** from a project tier, the company tier is found per machine through
+  `MEMORY_COMPANY_ROOT`, `memory/.memory/company-root` (written by the scaffold) or Basic Memory's
+  project list; results list the project tier first.
+- **Discovery:** `mem load` names up to two confident matches in its receipt and in its question;
+  the Stop hook, once per session after 8 or more shell tool calls with no playbook saved, asks the
+  agent to *offer* `/playbook-save` (it counts tool calls in the host's transcript file and reads
+  nothing else from it).
+
+**[verified: tools/test_playbooks.py, 51 checks, each rule shown to fail its tests when removed]**
+
+### 4.10 First-prompt load
+
+Claude Code's `UserPromptSubmit` hook runs `mem --hook prompt`: on the first prompt of a session
+(not a slash command, and only if nothing was loaded yet) it runs the entry protocol for that
+prompt and prints the receipt, or the question, which Claude Code adds to the agent's context. So
+context arrives even when an agent skips its instructions. Later prompts, and any error, print
+nothing; `protocol.load_on_first_prompt: false` turns it off. Kiro and Cursor still rely on the
+agent following its rules. **[verified: test_playbooks.py discovery checks]**
 
 ### 4.8 CI workflows (not yet exercised on GitHub)
 
@@ -677,6 +724,7 @@ Each with where it is enforced and the test that shows it failing when broken.
 | `tools/test_atlas.py` | 47 | content, restricted traces, open-under-restricted, publish_authors, 25 tampering cases, duplicate keys, `--against-source`, bare `--out` |
 | `tools/test_init.py` | 16 | `init.py` on a fresh copy: owner row, instance flag, CODEOWNERS, filled placeholders, stamps, git identity, template-only files removed, a clean guard check and first commit; refuses a second run, a bad email, a bad login, `--yes` without `--github` |
 | `tools/test_sync.py` | 25 per platform (bash on Linux/macOS, PowerShell on Windows); 38 with `--impl all` | 11 area-06 scenarios plus a protected main (exit 7, commit-only) per implementation against bare remotes; dispatcher mode/lock/usage; pull-request mode end to end (fallback, one branch per person, squash-merge then pre, refusal to overwrite, gh with a fake CLI); ASCII-only PowerShell |
+| `tools/test_playbooks.py` | 51 | save (id, author, similar, update, no steps, secret), find (ranking, typos, regex), run (banner, caveat placement, markers, placeholders, environment, export), trust (own run, another's run, approval levels, caveats keep it, edits drop it, stats), every guard rule as a negative in staged mode and three in CI range mode, concurrent run logs merged by union, cross-tier find from a scaffolded project, load receipt, first-prompt hook, Stop-hook offer, Atlas trust against a forged label, begin/since |
 | `tools/test_scaffold.py` | 7 per platform | a project tier gets its guard, policy, `memory-gate` workflow and CODEOWNERS block; an existing CODEOWNERS is untouched (`.suggested`); a second run changes nothing; the new tier passes its guard |
 | `web/test` (`npm test`) | 110 + 9 | UI caps, camera-independent type, **rendered-page privacy oracle** (529 withheld markers on the template corpus), reduced motion, negative tests including a deliberate leak |
 
@@ -829,6 +877,7 @@ Things worth trying to break, each with the expected result:
 | `scripts/build_atlas.py` | 1,388 | atlas data and redaction gate |
 | `scripts/sync-memory.py/.sh/.ps1` | 159 / 307 / 350 | sync dispatcher and implementations |
 | `scripts/new-project-memory.sh/.ps1` | 101 / 112 | project scaffold |
+| `playbooks/`, `decisions/ADR-005-playbooks.md` | - | the playbook folder note and the decision record |
 | `scripts/init.py` | 219 | turns the template into an instance: owner row, placeholders, git identity, CODEOWNERS, stamps, removes template-only files |
 | `LICENSE`, `LICENSE-NOTES`, `NOTICE`, `.github/README.md`, `.github/CONTRIBUTING.md`, `.github/SECURITY.md` | - | the licences (Apache-2.0 for code, MIT-0 for notes, templates and agent configuration; `NOTICE` has the split) and the open-source front page; `init.py` removes the three `.github/` files in an instance |
 | `governance/roles.json` | 478 | all policy |
