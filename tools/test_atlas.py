@@ -143,7 +143,7 @@ def main():
                        "Deal", "context/restricted", "Leaky Open"):
             ok("%s appears nowhere in the public file" % secret, secret not in raw)
         ok("no local session ledger in the public file", pub["sessions"] == [])
-        rc, out = sh(root, sys.executable, ATLAS, "--verify", pub_path)
+        rc, out = sh(root, sys.executable, ATLAS, "--verify", pub_path, "--shape-only", "--policy", os.path.join(root, "governance", "roles.json"))
         ok("verify passes on the real public build", rc == 0, out.strip())
 
         print("\nevery rule can fail")
@@ -180,12 +180,12 @@ def main():
             fn(d)
             p = os.path.join(tmp, "tampered.json")
             json.dump(d, open(p, "w"))
-            rc, out = sh(root, sys.executable, ATLAS, "--verify", p)
+            rc, out = sh(root, sys.executable, ATLAS, "--verify", p, "--shape-only", "--policy", os.path.join(root, "governance", "roles.json"))
             ok("negative: verify FAILS on a leaked %s" % name, rc == 1, out.strip().splitlines()[-1] if out.strip() else "")
         p = os.path.join(tmp, "dupkey.json")
         raw_pub = open(pub_path).read()
         open(p, "w").write(raw_pub.replace('"schema": 4,', '"schema": 4, "schema": 4,', 1))
-        rc, out = sh(root, sys.executable, ATLAS, "--verify", p)
+        rc, out = sh(root, sys.executable, ATLAS, "--verify", p, "--shape-only", "--policy", os.path.join(root, "governance", "roles.json"))
         ok("negative: verify FAILS on a duplicate JSON key", rc == 1, out.strip()[-80:])
         d = copy.deepcopy(pub)
         d["stats"]["notes"] += 1  # schema-valid, redaction-valid, but not what the notes produce
@@ -209,6 +209,78 @@ def main():
               [a.get(k) for a in d["activity"] for k in ("author", "agent")]
         ok("no author, editor or agent anywhere when publish_authors is false", rc == 0 and not any(ids), out.strip()[-160:])
 
+        print("\nrecheck 07-F6 / D2 / 07-F1 / D7: titles, code paths, history")
+        write(root, "decisions/adr-009-acquire-acmecorp.md", note("ADR-009 Acquire ACMECORP-SECRET", "We decide.",
+                                                                   extra="public_title: Decision nine\n", ntype="decision"))
+        write(root, "decisions/adr-010-hidden-bravo.md", note("ADR-010 BRAVOSECRET", "We decide more.",
+                                                               extra="publish_title: false\n", ntype="decision"))
+        write(root, "log/journal/links.md", note("Links", "A journal note linking both.\n\n## Observations\n- [fact] fine",
+                                                  rel_to="ADR-009 Acquire ACMECORP-SECRET") + "- depends_on [[ADR-010 BRAVOSECRET]]\n")
+        write(root, "src/zz_code_only_SECRETCODE.py", "print(1)\n")
+        write(root, "context/acme-SECRETSLUG.md", note("Acme Later Restricted", "Soon restricted."))
+        sh(root, sys.executable, GUARD, "stamp", "--all")
+        sh(root, "git", "add", "-A")
+        sh(root, "git", "commit", "-qm", "titles and code")
+        os.makedirs(os.path.join(root, "context", "restricted"), exist_ok=True)
+        sh(root, "git", "mv", "context/acme-SECRETSLUG.md", "context/restricted/acme.md")
+        sh(root, "git", "commit", "-qm", "restrict it")
+        p = os.path.join(tmp, "titles.json")
+        rc, out = sh(root, sys.executable, ATLAS, "--out", p)
+        txt = open(p).read() if os.path.isfile(p) else ""
+        d = json.loads(txt) if txt else {"nodes": [], "edges": []}
+        ok("a public_title or publish_title:false note's real title and slug appear nowhere",
+           rc == 0 and not any(x in txt for x in ("ACMECORP", "acmecorp", "BRAVOSECRET", "bravo")), out.strip()[-200:])
+        by_title = {n["title"]: n["id"] for n in d["nodes"]}
+        links = by_title.get("Links")
+        tgt = {e["target"] for e in d["edges"] if e["source"] == links}
+        ok("relations to them still resolve, to their opaque ids",
+           by_title.get("Decision nine") in tgt and by_title.get("Untitled note") in tgt
+           and all("withheld-" in by_title.get(t, "") for t in ("Decision nine", "Untitled note")), (tgt, by_title))
+        ok("no code path is published in activity, and no old path of a now-restricted note",
+           "SECRETCODE" not in txt and "SECRETSLUG" not in txt and d.get("activity"), out.strip()[-200:])
+        rc, out = sh(root, sys.executable, ATLAS, "--verify", p)
+        ok("the build verifies against its source by default", rc == 0, out.strip()[-200:])
+        write(root, "context/restricted/plan.md", note("Plan", "Restricted plan.", extra="confidentiality: restricted\n"))
+        write(root, "log/journal/planning.md", note("Planning Notes", "Planning went fine."))
+        sh(root, sys.executable, GUARD, "stamp", "--all")
+        rc, out = sh(root, sys.executable, ATLAS, "--out", os.path.join(tmp, "plan.json"))
+        ok("a restricted title matches whole words only: 'Planning' does not block the build", rc == 0, out.strip()[-200:])
+        write(root, "log/journal/planning.md", note("Planning Notes", "We revisited the plan today."))
+        sh(root, sys.executable, GUARD, "stamp", "--all")
+        rc, out = sh(root, sys.executable, ATLAS, "--out", os.path.join(tmp, "plan2.json"))
+        ok("negative: the restricted title as a word still fails closed, with a way to fix it",
+           rc == 5 and "Reword" in out, out.strip()[-200:])
+        sh(root, "git", "reset", "-q", "--hard")
+        sh(root, "git", "clean", "-qfd", "context", "log")
+
+        print("\nshape-only verify trusts nothing in the file (07-F3)")
+        base = json.load(open(p))
+        pol_file = os.path.join(root, "governance", "roles.json")
+        tampers = [
+            ("a secret inside tags", lambda x: x["nodes"][0].update(tags=[{"s": "SECRET"}])),
+            ("a string category count", lambda x: x["nodes"][0].update(categories={"fact": "SECRET"})),
+            ("a string in cluster sample points", lambda x: x["arrangements"]["area"]["clusters"][0].update(sample=[["SECRET", 0, 0]])),
+            ("a free-text dependency type", lambda x: x.update(dependency_types=["SECRET VALUE HERE"])),
+            ("publish_authors granted by the file", lambda x: x["publication"].update(publish_authors=True)),
+            ("brief_levels widened by the file", lambda x: x["publication"].update(brief_levels=["L0", "L1", "L2", "L3"])),
+            ("a code path in activity", lambda x: x["activity"][0].update(paths=["src/secret_layout.py"])),
+        ]
+        red = []
+        for name, fn in tampers:
+            x = copy.deepcopy(base)
+            fn(x)
+            tp = os.path.join(tmp, "t.json")
+            json.dump(x, open(tp, "w"))
+            rc, out = sh(root, sys.executable, ATLAS, "--verify", tp, "--shape-only")
+            red.append((name, rc))
+        ok("negative: every file-only tamper is refused (%d cases)" % len(tampers), all(rc == 1 for _n, rc in red), red)
+        x = copy.deepcopy(base)
+        next(n for n in x["nodes"] if n["title"] == "Links").update(title="Renamed by hand")
+        tp = os.path.join(tmp, "t2.json")
+        json.dump(x, open(tp, "w"))
+        rc, out = sh(root, sys.executable, ATLAS, "--verify", tp)
+        ok("negative: plain --verify compares with the notes, so an edited title fails (U5)", rc == 1, out.strip()[-160:])
+
         print("\ncli (07-F10)")
         rc, out = sh(root, sys.executable, ATLAS, "--out", "bare.json")
         ok("--out with a bare filename works", rc == 0 and os.path.isfile(os.path.join(root, "bare.json")), out.strip()[-120:])
@@ -216,7 +288,7 @@ def main():
         shutil.rmtree(tmp, ignore_errors=True)
     passed = sum(RESULTS)
     print("\n%d passed, %d failed" % (passed, len(RESULTS) - passed))
-    return 0 if passed == len(RESULTS) == 47 else 1  # expected-count check: a run that stops early is red
+    return 0 if passed == len(RESULTS) == 55 else 1  # expected-count check: a run that stops early is red
 
 
 if __name__ == "__main__":

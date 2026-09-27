@@ -51,8 +51,12 @@ def git(*args, cwd=None, check=False):
     """Run git and return stdout as text. Never raises unless check=True."""
     # UTF-8 explicitly: on Windows the default locale codec is cp1252, and `git show` of a real
     # (non-ASCII) note crashed historical-ref loads (audit 04-F3).
+    # core.quotePath=false: with git's default, a non-ASCII path comes back quoted and escaped
+    # ("scripts/\303\251vil.py"), matched no rule, and fell to the permissive default level, so
+    # `scripts/évil.py` or a secret in `log/journal/café.md` passed every check (recheck U1).
+    # Listings that are parsed also use -z (see changed_files); this covers every other caller.
     p = subprocess.run(
-        ["git", *args], cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        ["git", "-c", "core.quotePath=false", *args], cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, encoding="utf-8", errors="replace",
     )
     if check and p.returncode != 0:
@@ -108,6 +112,11 @@ PROTECTED_FLOOR = [
     (".agents/**", "L3"), ("CLAUDE.md", "L3"), ("web/**", "L3"), (".gitignore", "L3"),
     (".mcp.json", "L3"), (".basic-memory/**", "L3"), ("vercel.json", "L3"), ("netlify.toml", "L3"),
     ("package.json", "L3"), ("*.config.js", "L3"), ("*.config.mjs", "L3"),
+    ("AGENTS.md", "L3"), ("GEMINI.md", "L3"), (".vscode/**", "L3"), (".devcontainer/**", "L3"),
+    (".githooks/**", "L3"), (".husky/**", "L3"), (".gitattributes", "L3"), (".gitmodules", "L3"),
+    (".pre-commit-config.yaml", "L3"), (".envrc", "L3"), ("Makefile", "L3"), ("pyproject.toml", "L3"),
+    ("templates/**/client-config/**", "L3"), ("templates/**/scripts/**", "L3"),
+    ("templates/**/governance/**", "L3"),
 ]
 # Stricter policy outcomes a floor never overrides: a derived copy must equal its source byte for
 # byte, and a bot-only path is closed to every person.
@@ -146,7 +155,9 @@ def validate_policy(pol):
     paths = pol.get("paths")
     if not isinstance(paths, dict) or not isinstance(paths.get("rules"), list) or not paths["rules"]:
         raise PolicyError("paths.rules must be a non-empty list")
-    for r in paths["rules"]:
+    if not isinstance(paths.get("project_rules", []), list):
+        raise PolicyError("paths.project_rules must be a list")
+    for r in paths["rules"] + list(paths.get("project_rules") or []):
         if not isinstance(r, dict) or not isinstance(r.get("glob"), str) or not r["glob"].strip():
             raise PolicyError("every path rule needs a glob: %r" % (r,))
         if r.get("level") not in LEVEL_ORDER + ["derived", "bot"]:
@@ -180,8 +191,71 @@ def usable_email(email):
     return bool(e) and "@" in e and "__todo" not in e
 
 
-def floor_level(npath):
-    best = None
+# Structural floor (recheck U3). A name list is always one entry short, so the floor also holds by
+# what a path IS, wherever it sits in the tier:
+#   - any dot-file or dot-folder segment (.vscode, .devcontainer, .githooks, .husky, .envrc,
+#     .gitattributes, .gitmodules, .pre-commit-config.yaml, ...): tools run or obey these;
+#   - any file at the tier root that is not Markdown (Makefile, pyproject.toml, LICENSE, ...);
+#   - agent instruction files at any depth (AGENTS.md, GEMINI.md, nested CLAUDE.md, ...), because
+#     agents load them from the folder they are working in;
+#   - executable, script and build files at any depth;
+#   - every template file that is not plain note Markdown (hook, MCP and workflow templates are
+#     copied into each new project and run there);
+#   - names a filesystem could resolve to a different path than the one classified: control or
+#     invisible characters, a colon (NTFS alternate streams), a trailing dot or space, 8.3 short
+#     names such as SCRIPT~1.
+INSTRUCTION_NAMES = (
+    "AGENTS.md", "AGENT.md", "CLAUDE.md", "CLAUDE.local.md", "GEMINI.md", "copilot-instructions.md",
+    "AGENT-RULES.md", ".cursorrules", ".windsurfrules", ".clinerules", ".goosehints", "CONVENTIONS.aider.md")
+INSTRUCTION_FILES = frozenset(x.casefold() for x in INSTRUCTION_NAMES)
+EXEC_SUFFIXES = frozenset((
+    "py", "pyw", "pyc", "pyz", "sh", "bash", "zsh", "fish", "ksh", "ps1", "psm1", "psd1", "ps1xml", "bat",
+    "cmd", "com", "js", "mjs", "cjs", "ts", "mts", "cts", "jsx", "tsx", "rb", "pl", "pm", "php", "lua",
+    "exe", "dll", "so", "dylib", "jar", "class", "vbs", "vbe", "wsf", "wsh", "hta", "msi", "scr", "lnk",
+    "reg", "desktop", "command", "applescript", "scpt", "service", "timer", "ipynb", "wasm", "node",
+    "toml", "cfg", "ini", "yml", "yaml", "json", "jsonc", "json5", "mdc", "plist", "xml"))
+BUILD_NAMES = (
+    "Makefile", "GNUmakefile", "makefile", "justfile", "Justfile", "Dockerfile", "Containerfile",
+    "Rakefile", "Gemfile", "Procfile", "Vagrantfile", "Brewfile", "Taskfile", "CODEOWNERS",
+    "requirements.txt", "constraints.txt", "Pipfile", "go.mod", "Cargo.toml")
+BUILD_FILES = frozenset(x.casefold() for x in BUILD_NAMES)
+_SUSPICIOUS = re.compile(r"[\x00-\x1f\x7f:]|[ .]$|^[^~]{1,8}~[0-9]")
+
+
+def _suspicious_segment(seg):
+    if _SUSPICIOUS.search(seg):
+        return True
+    return any(unicodedata.category(ch) in ("Cf", "Cc", "Co", "Cs", "Zl", "Zp") for ch in seg)
+
+
+def structural_floor(npath, raw=None):
+    """L3 when the path's shape makes it executable, an instruction, or ambiguous; else None."""
+    segs = [x for x in npath.split("/") if x]
+    if not segs:
+        return None
+    for seg in (raw or npath).replace("\\", "/").split("/"):
+        if seg and seg not in (".", "..") and _suspicious_segment(seg):
+            return "L3"
+    base = segs[-1]
+    if any(x.startswith(".") for x in segs) and base != ".gitkeep":
+        return "L3"
+    if base in INSTRUCTION_FILES or (base.endswith(".tmpl") and base[:-5] in INSTRUCTION_FILES):
+        return "L3"
+    if len(segs) == 1 and not base.endswith(".md"):
+        return "L3"
+    stem = base.split(".")[0]
+    if base in BUILD_FILES or stem in BUILD_FILES or base.startswith("requirements") and base.endswith(".txt"):
+        return "L3"
+    suffix = base.rsplit(".", 1)[-1] if "." in base else ""
+    if segs[0] == "templates" and not (base.endswith(".md.tmpl") or base.endswith(".md") or base == ".gitkeep"):
+        return "L3"
+    if suffix in EXEC_SUFFIXES:
+        return "L3"
+    return None
+
+
+def floor_level(npath, raw=None):
+    best = structural_floor(npath, raw)
     for g, lvl in PROTECTED_FLOOR:
         if glob_match(g.casefold(), npath) and (best is None or LEVEL_ORDER.index(lvl) > LEVEL_ORDER.index(best)):
             best = lvl
@@ -355,9 +429,14 @@ class Ctx:
             return n[len(pre) + 1:]
         return n
 
-    @staticmethod
-    def _policy_level(policy, p):
-        for rule in policy.get("paths", {}).get("rules", []):
+    def _policy_level(self, policy, p):
+        # A project tier (memory/ inside a code repository) plans ONE project: its context/ and
+        # decisions/ are L1 there, as levels.L1 says, and L2 only in the company tier. The rules
+        # that differ live in paths.project_rules and are tried first in a project tier (11-F5).
+        rules = policy.get("paths", {}).get("rules", [])
+        if self.prefix:
+            rules = (policy.get("paths", {}).get("project_rules") or []) + rules
+        for rule in rules:
             if glob_match(rule["glob"].casefold(), p):
                 return rule["level"], rule
         return policy.get("paths", {}).get("default", "L0"), None
@@ -371,7 +450,9 @@ class Ctx:
         lvl, _rule = self._policy_level(policy or self.policy, p)
         if lvl in FLOOR_KEEPS:
             return lvl
-        fl = floor_level(p)
+        fl = floor_level(p, repo_rel_path)
+        if repo_rel_path in (getattr(self, "special_paths", None) or ()):
+            fl = "L3"  # a symbolic link or submodule pointer, whatever folder it sits in
         if fl and level_rank(fl) > level_rank(lvl):
             return fl
         return lvl
@@ -522,38 +603,74 @@ def write_text(path, text):
 # --------------------------------------------------------------------------- change sets
 
 
+def _split_z(out):
+    return [x for x in out.split("\0")]
+
+
 def changed_files(ctx, staged=False, rng=None):
-    """(status, path) pairs, paths relative to the repo root."""
+    """(status, path) pairs, paths relative to the repo root.
+
+    Parsed from `--raw -z`: NUL-separated, so no path is ever quoted or escaped (a quoted
+    `"scripts/\303\251vil.py"` matched no rule and passed as L0, recheck U1), and the file modes
+    are visible, so a symbolic link or a submodule pointer is classified as the L3 change it is
+    (a link placed in a note folder can point anywhere).
+    """
     if rng:
-        out = git("-C", ctx.repo_root, "diff", "--name-status", "-M", rng)
+        out = git("-C", ctx.repo_root, "diff", "--raw", "-z", "-M", "--no-abbrev", rng)
     elif staged:
-        out = git("-C", ctx.repo_root, "diff", "--cached", "--name-status", "-M")
+        out = git("-C", ctx.repo_root, "diff", "--cached", "--raw", "-z", "-M", "--no-abbrev")
     else:
-        out = git("-C", ctx.repo_root, "diff", "--name-status", "-M", "HEAD")
+        out = git("-C", ctx.repo_root, "diff", "--raw", "-z", "-M", "--no-abbrev", "HEAD")
     files, seen = [], set()
-    for line in out.splitlines():
-        parts = line.split("\t")
-        if len(parts) < 2:
+    special = getattr(ctx, "special_paths", None)
+    if special is None:
+        special = ctx.special_paths = set()
+    toks = _split_z(out)
+    i = 0
+    while i < len(toks):
+        head = toks[i]
+        if not head.startswith(":"):
+            i += 1
             continue
-        status, path = parts[0][0], parts[-1]
+        meta = head[1:].split()
+        if len(meta) < 5:
+            i += 1
+            continue
+        status = meta[4][0]
+        modes = (meta[0], meta[1])
+        if status in ("R", "C"):
+            src, path = toks[i + 1], toks[i + 2]
+            i += 3
+        else:
+            src, path = None, toks[i + 1]
+            i += 2
+        if any(m in ("120000", "160000") for m in modes):
+            special.add(path)
+            if src:
+                special.add(src)
         if path not in seen:
             seen.add(path)
             files.append((status, path))
         # A rename is a deletion of its source as well as a write of its destination. Classifying
         # only the destination let `git mv context/x log/journal/x` remove L2 canon as L0
         # (audit 01-F3, 01-F4 case-only renames, 10-F4).
-        if status == "R" and len(parts) >= 3 and parts[1] not in seen:
-            seen.add(parts[1])
-            files.append(("D", parts[1]))
+        if status == "R" and src:
+            if not hasattr(ctx, "renamed_from"):
+                ctx.renamed_from = {}
+            ctx.renamed_from[path] = src
+        if status == "R" and src and src not in seen:
+            seen.add(src)
+            files.append(("D", src))
     if not rng and not staged:
         # A brand-new note is untracked, and `git diff` never shows it. Missing them would
         # mean the guard silently ignored exactly the files it exists to police.
-        for path in git("-C", ctx.repo_root, "ls-files", "--others",
-                        "--exclude-standard").splitlines():
-            path = path.strip()
+        for path in _split_z(git("-C", ctx.repo_root, "ls-files", "-z", "--others", "--exclude-standard")):
             if path and path not in seen:
                 seen.add(path)
                 files.append(("A", path))
+                full = os.path.join(ctx.repo_root, path)
+                if os.path.islink(full):
+                    special.add(path)
     return files
 
 
@@ -777,7 +894,14 @@ def check_duplicate(ctx, f, path, text):
 # `stamp`, carried forward when the line is edited, never recomputed. Everything that refers to a
 # single fact - pins, mutes, trials, evals, recall logs, `why` - refers to this id.
 CLAIM_LINE = re.compile(r"^(\s*-\s*\[([a-zA-Z][\w-]*)\]\s*)(.*?)(?:\s+\^([0-9a-f]{6}))?\s*$")
+# `mem retire` writes `... ^abc123 (retired 2026-09-01: why)`: the id is no longer last on the line,
+# and reading the line as unmarked handed it the same id again at the next stamp (recheck 02-F5).
+RETIRED_TAIL = re.compile(r"^(.*?)\s+\^([0-9a-f]{6})\s+\(retired\b[^)]*\)\s*$")
+# Something shaped like an id that is not one (`^ABCDEF`, `^12345g`, `^abcdef1`), recheck 02-F9.
+MALFORMED_TAIL = re.compile(r"\s\^([0-9A-Za-z]{4,8})\s*$")
 CARRY_THRESHOLD = 0.5
+MOVE_THRESHOLD = 0.8     # a claim that left one note is recognised in another only when nearly unchanged
+CARRY_MARGIN = 0.08      # the best match must exceed the runner-up by this much, or nobody inherits
 
 
 def parse_claims(body):
@@ -790,7 +914,12 @@ def parse_claims(body):
             continue
         m = CLAIM_LINE.match(ln)
         if m and m.group(3).strip():
-            out.append((i, m.group(2).lower(), m.group(3).strip(), m.group(4), section))
+            text, cid = m.group(3).strip(), m.group(4)
+            if not cid:
+                r = RETIRED_TAIL.match(text)
+                if r:
+                    text, cid = r.group(1).strip(), r.group(2)
+            out.append((i, m.group(2).lower(), text, cid, section))
     return out
 
 
@@ -817,20 +946,51 @@ def fm_list(fm_lines, key):
     return [x.strip().strip("'\"") for x in raw.strip("[]").split(",") if x.strip().strip("'\"")]
 
 
+def claim_norm(text):
+    """Canonical claim text: Unicode-normalised (NFC and NFD spellings of 'café' were two ids,
+    recheck 02-F7), case-folded (Straße and STRASSE), whitespace collapsed."""
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", text or "").casefold()).strip()
+
+
+_STEM = re.compile(r"(ations?|ings?|ed|es|ly|s)$")
+
+
 def _claim_tokens(text):
-    return {w for w in re.findall(r"[a-z0-9_.\-/]{3,}", (text or "").lower())}
+    out = set()
+    for w in re.findall(r"[\w./-]{2,}", claim_norm(text)):
+        if len(w) > 4 and not re.search(r"\d", w):
+            w = _STEM.sub("", w) or w
+        out.add(w)
+    return out
 
 
 def _claim_similarity(a, b):
-    """Token overlap OR character similarity, whichever is higher. Jaccard alone misses the
-    common agent edit - a typo fixed, a number updated, a clause appended - where most words
-    survive but the set changes; SequenceMatcher alone misses reordered sentences."""
-    return max(jaccard(_claim_tokens(a), _claim_tokens(b)),
-               difflib.SequenceMatcher(None, a.lower(), b.lower()).ratio())
+    """Token overlap, containment, or character similarity, whichever is highest. Jaccard alone
+    misses the common edit where a clause is appended; SequenceMatcher alone misses reordered
+    words; containment counts only when both lines have some substance."""
+    ta, tb = _claim_tokens(a), _claim_tokens(b)
+    jac = jaccard(ta, tb)
+    seq = difflib.SequenceMatcher(None, claim_norm(a), claim_norm(b)).ratio()
+    # The mean, not the max, of the two: character similarity alone rates "EU ... 35 seconds" and
+    # "US ... 20 seconds" 0.92 alike, which is how two edited, reordered lines swapped ids (02-F2).
+    contain = 0.85 * len(ta & tb) / min(len(ta), len(tb)) if min(len(ta), len(tb)) >= 3 else 0.0
+    return max(jac, seq, contain)
+
+
+def _claim_scores(a, b):
+    """(how similar, how distinctly): the first decides whether two lines can be the same claim,
+    the second which of several candidates it is. Character similarity alone rates "EU ... 35
+    seconds" and "US ... 20 seconds" 0.92 alike, which is how two edited, reordered lines swapped
+    ids (02-F2); the mean with token overlap tells them apart."""
+    ta, tb = _claim_tokens(a), _claim_tokens(b)
+    jac = jaccard(ta, tb)
+    seq = difflib.SequenceMatcher(None, claim_norm(a), claim_norm(b)).ratio()
+    contain = 0.85 * len(ta & tb) / min(len(ta), len(tb)) if min(len(ta), len(tb)) >= 3 else 0.0
+    return max(jac, seq, contain), max(jac, (jac + seq) / 2, contain)
 
 
 def new_claim_id(note_id, text, taken):
-    seed = note_id + "\n" + re.sub(r"\s+", " ", (text or "").strip().lower())
+    seed = note_id + "\n" + claim_norm(text)
     n = 0
     while True:
         cid = hashlib.sha1((seed + ("" if n == 0 else "#%d" % n)).encode("utf-8")).hexdigest()[:6]
@@ -840,7 +1000,8 @@ def new_claim_id(note_id, text, taken):
 
 
 def all_claim_ids(ctx):
-    """{claim_id: repo_rel_path} for every claim in this tier's working tree."""
+    """{claim_id: repo_rel_path} for every claim in this tier's working tree (retired ones too: a
+    retired id is never handed out again)."""
     out = {}
     for _st, path in all_notes_as_changes(ctx):
         try:
@@ -853,24 +1014,99 @@ def all_claim_ids(ctx):
     return out
 
 
-def stamp_claim_ids(note_id, body, prev_body=None, foreign=None):
+def _assign(unmarked, candidates, threshold):
+    """Pair unmarked lines with candidate ids, best pairs first, each used once. A pair is kept only
+    when it clears the threshold AND exceeds every rival for either side by CARRY_MARGIN: two edited,
+    reordered lines swapped ids when each line simply took its best match in order (recheck 02-F2),
+    and an unrelated new line took a deleted line's id because it was the only one (02-F3)."""
+    scores, liberal = {}, {}
+    for u in unmarked:
+        for c in candidates:
+            lib, sim = _claim_scores(u[2], c[2])
+            if u[1] != c[1]:
+                lib, sim = lib * 0.8, sim * 0.8   # a changed category is weaker evidence of the same fact
+            scores[(u[0], c[3])] = sim
+            liberal[(u[0], c[3])] = lib
+    out, used_u, used_c = {}, set(), set()
+    for (ui, cid), sim in sorted(scores.items(), key=lambda kv: -kv[1]):
+        if liberal[(ui, cid)] < threshold or ui in used_u or cid in used_c:
+            continue
+        rival_u = max([v for (a, b), v in scores.items() if a == ui and b != cid and b not in used_c] or [0])
+        rival_c = max([v for (a, b), v in scores.items() if b == cid and a != ui and a not in used_u] or [0])
+        if sim - max(rival_u, rival_c) < CARRY_MARGIN:
+            continue
+        out[ui] = cid
+        used_u.add(ui)
+        used_c.add(cid)
+    return out
+
+
+def claim_context(ctx):
+    """(ids now {id: path}, ids at HEAD {id: path}, moved pool) for this tier. The pool holds claims
+    that were in a note at HEAD and are in no note now, from the notes this change touches: those
+    are the ones a move could have carried elsewhere."""
+    now = all_claim_ids(ctx)
+    head, pool = {}, []
+    for status, path in changed_files(ctx):
+        if not path.endswith(".md") or not is_note(ctx, path):
+            continue
+        raw = blob_text(ctx, "HEAD:" + path)
+        if raw is None:
+            continue
+        for c in parse_claims(split_frontmatter(raw.decode("utf-8", "replace"))[1]):
+            if c[3]:
+                head.setdefault(c[3], path)
+                if c[3] not in now and c[4] != "retired":
+                    pool.append(c)
+    # every committed id counts as taken, including notes this change does not touch
+    listing = git("-C", ctx.repo_root, "grep", "-I", "-h", "-o", "-E", r"\^[0-9a-f]{6}", "HEAD", "--",
+                  (ctx.prefix or ".") + "*.md" if ctx.prefix else "*.md")
+    for tok in set(re.findall(r"\^([0-9a-f]{6})", listing)):
+        head.setdefault(tok, None)
+    return now, head, pool
+
+
+def stamp_claim_ids(note_id, body, prev_body=None, foreign=None, moved=None, taken_elsewhere=None,
+                    foreign_at_head=None):
     """Give every claim an id, carrying ids forward across edits. Returns (body, stamped, carried).
 
     The failure this exists to prevent: an agent rewrites a line and drops its `^id`, and every
     pin, trial and log entry pointing at that fact silently detaches. An unmarked line is matched
-    against the ids that vanished from this note since HEAD; a close enough match inherits the id.
-    A one-for-one swap - one id gone, one unmarked line - is treated as an edit regardless of how
-    different the words are, because that is overwhelmingly what it is."""
+    against the ids that vanished from this note since HEAD (and, via `moved`, from other notes in
+    the same change, so a moved claim keeps its id, recheck 02-F4). A match must be close AND
+    unambiguous; otherwise the line gets a new id, because a lost id is visible and a wrongly
+    transferred one is not.
+
+    `foreign` maps ids living in OTHER notes to their path. A line of this note ending with one:
+      - the note had that id at HEAD: it is the original, left alone (the newcomer is re-id'd);
+      - an eval line (`recall "..." includes ^id`): a reference; it keeps it and gets its own id;
+      - otherwise a collision or a copy: the id is replaced (recheck 02-F6: the repair used to
+        re-id the OLDER claim, silently moving every reference to the newcomer)."""
     lines = (body or "").split("\n")
-    claims = parse_claims(body)
-    # A line ENDING with another note's claim id is referencing it, not claiming its identity -
-    # `recall "..." includes ^be2885`. Left alone, the reference would be read as this line's own
-    # id and two facts would share one name. Such a line keeps the reference in its text and gets
-    # its own id appended after it.
-    foreign = foreign or set()
-    for (i, _c, _t, cid, _s) in claims:
-        if cid and cid in foreign:
-            lines[i] = lines[i].rstrip() + " ^" + new_claim_id(note_id, lines[i], foreign | {cid})
+    prev_claims = parse_claims(prev_body) if prev_body else []
+    owned = {c[3] for c in prev_claims if c[3]}
+    foreign = foreign or {}
+    if not isinstance(foreign, dict):
+        foreign = {x: None for x in foreign}
+    foreign_at_head = foreign_at_head or set()
+    taken = (set(taken_elsewhere or ()) - owned) | set(foreign)   # this note's own old ids may come back
+
+    # malformed id-shaped tails: normalise a recognisable one, strip the rest (02-F9)
+    for (i, _c, _t, cid, sec) in parse_claims(body):
+        if cid or sec == "retired":
+            continue
+        m = MALFORMED_TAIL.search(lines[i])
+        if m:
+            tok = m.group(1).lower()
+            lines[i] = lines[i][:m.start()].rstrip() + ((" ^" + tok) if re.match(r"^[0-9a-f]{6}$", tok) else "")
+
+    for (i, cat, _t, cid, sec) in parse_claims("\n".join(lines)):
+        if not cid or cid not in foreign or cid in owned or sec == "retired":
+            continue
+        if cat == "eval" or re.search(r"\bincludes\s+\^%s\s*$" % cid, lines[i]):
+            lines[i] = lines[i].rstrip() + " ^" + new_claim_id(note_id, lines[i], taken | {cid})
+        elif cid in foreign_at_head or (foreign.get(cid) or "") < note_id + ".md":
+            lines[i] = re.sub(r"\s+\^%s\s*$" % cid, "", lines[i])        # the newcomer gets a new id below
     claims = parse_claims("\n".join(lines))
     seen, dupes = set(), set()
     for (i, _c, _t, cid, _s) in claims:
@@ -882,22 +1118,22 @@ def stamp_claim_ids(note_id, body, prev_body=None, foreign=None):
         lines[i] = re.sub(r"\s+\^[0-9a-f]{6}\s*$", "", lines[i])
     claims = parse_claims("\n".join(lines))
     have = {c[3] for c in claims if c[3]}
-    orphans = [c for c in parse_claims(prev_body)] if prev_body else []
-    orphans = [c for c in orphans if c[3] and c[3] not in have]
-    unmarked = [c for c in claims if not c[3]]
-    used, taken, stamped, carried = set(), set(have), 0, 0
-    one_for_one = len(unmarked) == 1 and len(orphans) == 1
+    taken |= have
+    orphans = [c for c in prev_claims if c[3] and c[3] not in have and c[3] not in taken - have
+               and c[4] != "retired"]
+    unmarked = [c for c in claims if not c[3] and c[4] != "retired"]
+    got = _assign(unmarked, orphans, CARRY_THRESHOLD)
+    rest = [u for u in unmarked if u[0] not in got]
+    if moved and rest:
+        live = set(foreign) | have          # ids some note carries NOW; the pool's are all historical
+        pool = [c for c in moved if c[3] not in live and c[3] not in got.values()]
+        for ui, cid in _assign(rest, pool, MOVE_THRESHOLD).items():
+            got[ui] = cid
+            moved[:] = [c for c in moved if c[3] != cid]   # one note inherits a moved id, once
+    stamped, carried = 0, 0
     for (i, _cat, text, _cid, _sec) in unmarked:
-        best, best_sim = None, 0.0
-        for (pi, _pc, ptext, pid, _ps) in orphans:
-            if pid in used:
-                continue
-            sim = _claim_similarity(text, ptext)
-            if sim > best_sim:
-                best, best_sim = pid, sim
-        if best and (best_sim >= CARRY_THRESHOLD or one_for_one):
-            cid = best
-            used.add(best)
+        if i in got:
+            cid = got[i]
             carried += 1
         else:
             cid = new_claim_id(note_id, text, taken)
@@ -939,7 +1175,7 @@ def code_files(root):
     it respects .gitignore and is fast; a bounded walk otherwise."""
     if root in _CODE_FILES:
         return _CODE_FILES[root]
-    out = [x for x in git("-C", root, "ls-files").splitlines() if x.strip()]
+    out = [x for x in git("-C", root, "ls-files", "-z").split("\0") if x.strip()]
     if not out:
         skip = {".git", "node_modules", ".venv", "venv", "__pycache__", ".memory", "dist", "build"}
         for dirpath, dirnames, filenames in os.walk(root):
@@ -1109,6 +1345,21 @@ def validate_note(ctx, f, path, text, known_titles, strict_attribution):
     if unmarked:
         f.add("WARN", "CLAIM-ID", path, "%d claim(s) have no id yet" % unmarked,
               "`stamp` assigns ids; sync-memory post runs it before every commit")
+    bad_tails = [c[2][-12:] for c in claims if not c[3] and MALFORMED_TAIL.search(" " + c[2])]
+    if bad_tails:
+        f.add("WARN", "CLAIM-ID", path, "a line ends with something shaped like an id that is not one: %s"
+              % ", ".join(bad_tails[:3]), "ids are ^ plus six lower-case hex digits; `stamp` repairs it")
+    # A reworded line that lost its id gets a new one at the next stamp, and pins, evals and trials
+    # pointing at the old id detach. Say so, every time (recheck 02-F1): the lexical match cannot
+    # recognise a true paraphrase, but a person can.
+    head_raw = blob_text(ctx, "HEAD:" + path)
+    if head_raw:
+        was = {c[3] for c in parse_claims(split_frontmatter(head_raw.decode("utf-8", "replace"))[1]) if c[3]}
+        gone = sorted(was - {c[3] for c in claims if c[3]} - set(getattr(ctx, "_tier_claim_ids", set())))
+        if gone:
+            f.add("WARN", "CLAIM-ID", path, "claim id(s) gone from this note: %s" % " ".join("^" + x for x in gone[:8]),
+                  "if a line was reworded, put its old ^id back at the end of the new line so pins, evals and "
+                  "trials keep pointing at it; if the fact was removed, `mem retire ^id` keeps its history")
 
     proto = ctx.policy.get("protocol", {})
     if rel == "CORE.md":
@@ -1235,7 +1486,11 @@ def cmd_stamp(ctx, args):
             fm = fm_set(fm, "confidentiality", ctx.policy["sensitivity"]["default"])
         if ctx.handle:
             is_new = not exists_at(ctx, "HEAD", path)
-            if is_new or not fm_get(fm, "author"):
+            was = None if is_new else blob_text(ctx, "HEAD:" + path)
+            creator = fm_get(split_frontmatter(was.decode("utf-8", "replace"))[0] or [], "author") if was else None
+            if creator:
+                fm = fm_set(fm, "author", creator)          # the creator never changes (recheck U2)
+            elif is_new or not fm_get(fm, "author"):
                 fm = fm_set(fm, "author", ctx.handle)      # creator: set from git when the note is new
             fm = fm_set(fm, "updated_by", ctx.handle)      # last editor, always current
         if ctx.actor_kind == "agent":
@@ -1248,9 +1503,20 @@ def cmd_stamp(ctx, args):
         prev_body = split_frontmatter(prev)[1] if prev else None
         note_id = rel[:-3] if rel.endswith(".md") else rel
         if tier_ids is None:
-            tier_ids = all_claim_ids(ctx)
-        foreign = {cid for cid, where in tier_ids.items() if where != path}
-        body, _stamped, _carried = stamp_claim_ids(note_id, body, prev_body, foreign)
+            tier_ids, head_ids, moved = claim_context(ctx)
+        # tier-relative, so the tie-break between two new colliding claims is the same in any tier
+        foreign = {cid: (where[len(ctx.prefix):] if ctx.prefix and where.startswith(ctx.prefix) else where)
+                   for cid, where in tier_ids.items() if where != path}
+        at_head_elsewhere = {cid for cid, where in head_ids.items() if where != path}
+        body, _stamped, _carried = stamp_claim_ids(note_id, body, prev_body, foreign, moved=moved,
+                                                   taken_elsewhere=set(tier_ids) | set(head_ids),
+                                                   foreign_at_head=at_head_elsewhere)
+        for cid, where in list(tier_ids.items()):
+            if where == path:
+                del tier_ids[cid]
+        for (_i, _c, _t, cid, _s) in parse_claims(body):
+            if cid:
+                tier_ids[cid] = path
 
         new_text = render(fm, body)
         if new_text != text:
@@ -1278,6 +1544,58 @@ def exists_at(ctx, ref, path):
         return False
     return subprocess.run(["git", "-C", ctx.repo_root, "cat-file", "-e", "%s:%s" % (ref, path)],
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+
+def range_head(rng):
+    """The side of a range being judged: B in A...B or A..B, HEAD when B is empty."""
+    for sep in ("...", ".."):
+        if sep in rng:
+            return rng.split(sep, 1)[1] or "HEAD"
+    return "HEAD"
+
+
+def blob_text(ctx, spec):
+    """The exact content git holds for `rev:path` (or `:path` for the index), or None."""
+    p = subprocess.run(["git", "-C", ctx.repo_root, "cat-file", "blob", spec], stdout=subprocess.PIPE,
+                       stderr=subprocess.DEVNULL)
+    if p.returncode != 0:
+        return None
+    return p.stdout
+
+
+def change_bytes(ctx, path, staged=False, rng=None):
+    """What will actually be committed or merged for a path, as bytes (None if absent).
+
+    The guard used to read the WORKING TREE even for `check --staged`: stage a secret, then edit or
+    delete the file on disk, and the commit carried content the guard never saw (the deleted case
+    was skipped outright). Staged checks read the index, range checks the head of the range."""
+    if staged:
+        return blob_text(ctx, ":" + path)
+    if rng:
+        return blob_text(ctx, "%s:%s" % (range_head(rng), path))
+    try:
+        with open(os.path.join(ctx.repo_root, path), "rb") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
+def check_author_kept(ctx, f, path, text, base_ref, src=None):
+    """An existing note's `author` is its creator and never changes; only `updated_by` moves.
+    Rewriting it to another registered person passed every check (recheck U2)."""
+    was = blob_text(ctx, "%s:%s" % (base_ref, src or path)) if base_ref else None
+    if was is None:
+        return
+    ofm, _ob = split_frontmatter(was.decode("utf-8", "replace"))
+    old = fm_get(ofm or [], "author")
+    if not old:
+        return
+    fm, _b = split_frontmatter(text)
+    new = fm_get(fm or [], "author")
+    if new != old:
+        f.add("FAIL", "ATTRIBUTION", path,
+              "the note's author was %r and this change records %r" % (old, new),
+              "`author` is the note's creator and never changes; the last editor goes in `updated_by`")
 
 
 def handle_for_email(ctx, email):
@@ -1578,11 +1896,13 @@ def check_playbook_approval(ctx, f, path, text, base_ref, rng):
               "run `mem playbook approve` after the last edit to the steps")
 
 
-def check_runlog(ctx, f, path, base_ref, rng):
+def check_runlog(ctx, f, path, base_ref, rng, text=None):
     """A .runs file is append-only, every line parses, and each NEW line names whoever committed it:
     the committing identity locally, each commit's author in a range. No one logs a run for someone else."""
-    abs_path = os.path.join(ctx.repo_root, path)
-    cur = read_text(abs_path) if os.path.isfile(abs_path) else ""
+    if text is None:
+        abs_path = os.path.join(ctx.repo_root, path)
+        text = read_text(abs_path) if os.path.isfile(abs_path) else ""
+    cur = text
     base = git("-C", ctx.repo_root, "show", "%s:%s" % (base_ref, path)) if base_ref and exists_at(ctx, base_ref, path) else ""
     runs, bad = parse_runs(cur)
     for ln in bad[:3]:
@@ -1639,7 +1959,65 @@ def cmd_classify(ctx, args):
     print(top)
     if not args.quiet:
         sys.stderr.write("memory-guard: highest level %s (%s)\n" % (top, ", ".join(why[:5]) or "no changes"))
+    if getattr(args, "require_owned", False):
+        return require_owned(ctx, args)
     return EXIT_OK
+
+
+def require_owned(ctx, args):
+    """Fail when a path above the auto-merge ceiling would need no review under the CODEOWNERS the
+    trusted policy generates. CODEOWNERS is a glob list and case-sensitive; the guard's floor is not
+    (AgEnTs.md, a symbolic link, an 8.3 alias). Such a path would merge with no reviewer, so the gate
+    stops it instead (recheck U3)."""
+    auto = [l for l in (ctx.policy.get("enforcement") or {}).get("auto_merge_levels") or [] if l in LEVEL_ORDER]
+    if not auto:
+        return EXIT_OK  # the catch-all owns every path
+    ceiling = max(LEVEL_ORDER.index(l) for l in auto)
+    body = codeowners_body(ctx.policy, ctx.prefix)
+    unowned = []
+    for status, path in changed_files(ctx, staged=args.staged, rng=args.range):
+        lvl = ctx.required_level(path)
+        if lvl is None:
+            continue
+        eff = "L3" if lvl in FLOOR_KEEPS else lvl
+        if LEVEL_ORDER.index(eff) > ceiling and not codeowners_owner(body, path):
+            unowned.append((path, eff))
+    for path, eff in unowned:
+        sys.stderr.write("::error::%s needs %s review but no CODEOWNERS line can require one for this "
+                         "spelling; rename it or have an owner commit it\n" % (path, eff))
+    return EXIT_DENIED if unowned else EXIT_OK
+
+
+def _codeowners_rx(pattern):
+    p = pattern.strip()
+    anchored = p.startswith("/") or "/" in p.strip("/")
+    p = p.strip("/") if not p.endswith("/") else p.strip("/")
+    out, i = "", 0
+    while i < len(p):
+        if p.startswith("**/", i):
+            out += "(?:.*/)?"; i += 3
+        elif p.startswith("**", i):
+            out += ".*"; i += 2
+        elif p[i] == "*":
+            out += "[^/]*"; i += 1
+        elif p[i] == "?":
+            out += "[^/]"; i += 1
+        else:
+            out += re.escape(p[i]); i += 1
+    return re.compile(("^" if anchored else "(?:^|.*/)") + out + "(?:/.*)?$")
+
+
+def codeowners_owner(body, path):
+    """The owners GitHub would require for a path under this CODEOWNERS text (last match wins)."""
+    got = None
+    for line in body.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split()
+        if _codeowners_rx(parts[0]).match(path):
+            got = parts[1:]
+    return got or []
 
 
 def _codeowners_login(handle, p):
@@ -1666,11 +2044,16 @@ def codeowners_body(policy, prefix=""):
     head = "# GENERATED by `memory_guard.py codeowners --write` from governance/roles.json. Do not edit.\n"
     base = "/" + prefix if prefix else "/"
     catch_all = (base + "**") if prefix else "*"
+    # A project tier shares .github/ with the product. The gate workflow and this file decide what
+    # a memory change needs, so they belong to the memory's owners too: otherwise one product PR
+    # could delete the block or the gate, and every later memory PR would need nobody (recheck D4).
+    gate = ("\n/.github/workflows/memory-gate.yml    %s\n/.github/CODEOWNERS    %s"
+            % (" ".join(owners), " ".join(owners))) if prefix else ""
     auto = [l for l in (policy.get("enforcement") or {}).get("auto_merge_levels") or [] if l in LEVEL_ORDER]
     if not auto:
         return (head + "# Every path needs an owner's review: the containment rule after the 2026-09 audit.\n"
                 "# Only enforced with branch protection on main requiring Code Owner review.\n"
-                "%s    %s\n" % (catch_all, " ".join(owners)))
+                "%s    %s%s\n" % (catch_all, " ".join(owners), gate))
     ceiling = max(LEVEL_ORDER.index(l) for l in auto)
     roles = policy.get("roles", {})
 
@@ -1688,7 +2071,8 @@ def codeowners_body(policy, prefix=""):
     # reverse, and a rule at an auto-merge level gets an owner-less line (GitHub's "no owner"),
     # so a specific L0 folder inside a broader protected glob still merges on its own.
     lines, seen, unique = [], set(), []
-    for r in (policy.get("paths") or {}).get("rules", []):   # the first rule for a glob is the one that applies
+    tier_rules = ((policy.get("paths") or {}).get("project_rules") or []) if prefix else []
+    for r in tier_rules + (policy.get("paths") or {}).get("rules", []):   # the first rule for a glob is the one that applies
         glob = (r.get("glob") or "").strip().lstrip("/")
         if glob and glob not in seen:
             seen.add(glob)
@@ -1706,11 +2090,36 @@ def codeowners_body(policy, prefix=""):
     # the protected floor last, so no policy line can take an owner off it
     for glob, _lvl in PROTECTED_FLOOR:
         lines.append("%s%s    %s" % (base, glob, " ".join(owners)))
+    # ...and the structural floor, at any depth, so an executable or instruction file placed inside
+    # an auto-merge folder (log/journal/.envrc, playbooks/AGENTS.md, log/x.py) still needs an owner
+    # (recheck U3). Names a filesystem could alias are caught by memory-gate itself.
+    for pat in structural_codeowners_patterns():
+        lines.append("%s**/%s    %s" % (base, pat, " ".join(owners)))
     return (head + "# enforcement.auto_merge_levels = %s: paths at those levels name no reviewer, so their pull\n"
             "# requests merge once memory-gate passes. Every other path names who must review it.\n"
-            "# Written in reverse of roles.json because GitHub applies the LAST matching line; the\n"
-            "# protected floor comes last.\n"
-            % json.dumps(auto) + "\n".join(lines) + "\n")
+            "# GitHub applies the LAST matching line, so: a catch-all for owners first (a path no rule\n"
+            "# names is never unowned), then roles.json in reverse, then the protected floor.\n"
+            % json.dumps(auto) + "%s    %s\n" % (catch_all, " ".join(owners)) + "\n".join(lines) + gate + "\n")
+
+
+def structural_codeowners_patterns():
+    """structural_floor() as CODEOWNERS patterns, for every rule that a glob can express."""
+    # CODEOWNERS is case-sensitive; the guard is not. The usual spellings are listed here, and any
+    # other spelling is stopped by `classify --require-owned` in memory-gate.
+    def spellings(name):
+        return {name, name.lower(), name.upper()}
+    pats = [".*", ".*/**"]
+    for x in INSTRUCTION_NAMES + BUILD_NAMES:
+        if not x.startswith(".") and x != "CODEOWNERS":
+            pats += sorted(spellings(x))
+    for x in sorted(EXEC_SUFFIXES):
+        pats += sorted(spellings("*." + x))
+    seen, out = set(), []
+    for x in pats:
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
 
 
 CODEOWNERS_BEGIN = "# >>> cairn memory: generated by memory_guard.py codeowners, do not edit >>>"
@@ -1736,7 +2145,8 @@ def cmd_codeowners(ctx, args):
             i = current.index(CODEOWNERS_BEGIN)
             j = current.index(CODEOWNERS_END) + len(CODEOWNERS_END)
             have = current[i:j] + "\n"
-            wanted = current[:i] + body + current[j:].lstrip("\n")
+            rest = (current[:i] + current[j:].lstrip("\n")).rstrip("\n")
+            wanted = (rest + "\n\n" if rest.strip() else "") + body  # the block always comes last
         else:
             have = ""
             wanted = (current.rstrip("\n") + "\n\n" if current.strip() else "") + body
@@ -1750,6 +2160,15 @@ def cmd_codeowners(ctx, args):
     if have != body:
         sys.stderr.write("memory-guard: .github/CODEOWNERS does not match roles.json; run codeowners --write\n")
         return EXIT_INVALID
+    if ctx.prefix:
+        tail = current[current.index(CODEOWNERS_END) + len(CODEOWNERS_END):]
+        extra = [l for l in tail.splitlines() if l.strip() and not l.strip().startswith("#")]
+        if extra:
+            # GitHub applies the LAST matching line, so anything after the block can take the
+            # memory's owners off its own paths.
+            sys.stderr.write("memory-guard: .github/CODEOWNERS has lines after the memory block (%s); "
+                             "the block must come last\n" % extra[0])
+            return EXIT_INVALID
     print("memory-guard: CODEOWNERS matches roles.json")
     return EXIT_OK
 
@@ -1767,6 +2186,7 @@ def cmd_check(ctx, args):
         if not args.quiet:
             print("memory-guard: nothing to check.")
         return EXIT_OK
+    renamed_from = getattr(ctx, "renamed_from", {})
 
     actor_max = ctx.effective_max_level()
     known_titles = repo_titles(ctx)
@@ -1780,12 +2200,14 @@ def cmd_check(ctx, args):
             if cid:
                 id_home.setdefault(cid, set()).add(npath)
     changed_set = {p for _st, p in files}
+    ctx._tier_claim_ids = set(id_home)   # an id moved to another note is not "gone"
     for cid, homes in sorted(id_home.items()):
         if len(homes) > 1 and homes & changed_set:
             f.add("FAIL", "CLAIM-ID", sorted(homes & changed_set)[0],
                   "claim id ^%s is the id of claims in %d notes: %s" % (cid, len(homes), ", ".join(sorted(homes))),
                   "a claim may not END with a reference to another claim - write references earlier in "
-                  "the line or in parentheses, e.g. `includes (^%s)`. `stamp` repairs it." % cid)
+                  "the line or in parentheses, e.g. `includes (^%s)`. `stamp --all` repairs it: the claim that is "
+                  "new keeps its text and gets a new id; the one committed first keeps this id." % cid)
     strict_attr = not args.no_attribution
 
     if args.range and getattr(args, "no_access", False):
@@ -1810,6 +2232,13 @@ def cmd_check(ctx, args):
         required = ctx.required_level(path)
         if required is None:
             continue  # outside this tier
+        trel = ctx._tier_rel(path) or ""
+        if status != "D" and (trel == ".memory" or trel.startswith(".memory/")):
+            # mem's per-machine state: personal pins, playbook placeholder values, session ledgers.
+            # Committing it publishes one person's private working state to the whole team.
+            f.add("FAIL", "LOCAL-STATE", path, "this is per-machine state from mem.py and is never shared",
+                  "unstage it (git rm -r --cached .memory) and add .memory/ to .gitignore")
+            continue
 
         # --- level / role -------------------------------------------------
         if required == "derived":
@@ -1819,15 +2248,14 @@ def cmd_check(ctx, args):
             rule = ctx.path_rule(path) or {}
             rel = path[len(ctx.prefix):] if ctx.prefix else path
             src_rel = rule.get("derived_from", "") + rel[len(rule.get("strip_prefix", "")):]
-            src_abs = os.path.join(ctx.notes_root, src_rel)
-            dst_abs = os.path.join(ctx.repo_root, path)
-            same = False
-            try:
-                # bytes, not text: universal-newline reads hid a CR/LF swap (audit 01-F7)
-                with open(src_abs, "rb") as a, open(dst_abs, "rb") as b:
-                    same = a.read() == b.read()
-            except OSError:
-                same = False
+            src_repo = os.path.relpath(os.path.join(ctx.notes_root, src_rel), ctx.repo_root).replace(os.sep, "/")
+            # bytes, not text: universal-newline reads hid a CR/LF swap (audit 01-F7); and what is
+            # being committed, not the working tree
+            a = change_bytes(ctx, src_repo, staged=args.staged, rng=args.range)
+            if a is None and (args.staged or args.range):
+                a = blob_text(ctx, "%s:%s" % (base_ref, src_repo)) if base_ref else None
+            b = change_bytes(ctx, path, staged=args.staged, rng=args.range)
+            same = a is not None and b is not None and a == b
             if not same:
                 f.add("FAIL", "ACCESS-DERIVED", path,
                       "this is a generated copy of %s and no longer matches it" % src_rel,
@@ -1845,6 +2273,8 @@ def cmd_check(ctx, args):
             pass  # the level is enforced by required review (classify + CODEOWNERS), not by this job
         elif not level_allows(actor_max, required):
             reason = ctx.path_reason(path)
+            if not reason and floor_level(trel, path):
+                reason = "the protected floor: an executable, configuration, instruction or ambiguous path"
             allowed_roles = [
                 r for r in ctx.policy["roles"]["order"]
                 if r not in ("reader",) and level_allows(
@@ -1869,13 +2299,10 @@ def cmd_check(ctx, args):
                 f.add("FAIL", "PLAYBOOK-RUNS", path, "a run log was deleted",
                       "run logs are append-only; failed runs are the most useful warnings")
             continue
-        abs_path = os.path.join(ctx.repo_root, path)
-        if not os.path.isfile(abs_path):
+        raw = change_bytes(ctx, path, staged=args.staged, rng=args.range)
+        if raw is None:
             continue
-        try:
-            text = read_text(abs_path)
-        except OSError:
-            continue
+        text = raw.decode("utf-8", "replace")
 
         # --- safety, on every changed file --------------------------------
         scan_secrets(f, path, text)
@@ -1885,17 +2312,22 @@ def cmd_check(ctx, args):
             if rel.startswith("templates/") or rel.startswith("log/CHANGELOG"):
                 continue
             validate_note(ctx, f, path, text, known_titles, strict_attr)
-            if strict_attr and not exists_at(ctx, base_ref, path):
+            src = renamed_from.get(path)
+            if strict_attr and not exists_at(ctx, base_ref, path) and not (src and exists_at(ctx, base_ref, src)):
                 check_new_author(ctx, f, path, text, args.range)
-            elif strict_attr and args.range:
-                check_range_editor(ctx, f, path, text, args.range)
+                if args.range:
+                    check_range_editor(ctx, f, path, text, args.range)  # later commits in the range (U4)
+            else:
+                check_author_kept(ctx, f, path, text, base_ref, src if src and not exists_at(ctx, base_ref, path) else None)
+                if strict_attr and args.range:
+                    check_range_editor(ctx, f, path, text, args.range)
             if status == "A" and rel.startswith("log/journal/"):
                 check_duplicate(ctx, f, path, text)
             if is_playbook(ctx, path):
                 validate_playbook(ctx, f, path, text)
                 check_playbook_approval(ctx, f, path, text, base_ref, args.range)
         elif is_runlog(ctx, path):
-            check_runlog(ctx, f, path, base_ref, args.range)
+            check_runlog(ctx, f, path, base_ref, args.range, text)
 
     # --- write-back: code a feature covers changed, its note did not ------
     # This is what keeps the feature spine alive. Every wiki's component page rots the same way:
@@ -2093,8 +2525,18 @@ def cmd_significance(ctx, args):
     work_repo = hook.get("cwd") or ctx.repo_root
     # -uall, not the default: plain --porcelain collapses an untracked directory to "?? dir/",
     # so otherwise no file marker below would ever match an untracked file.
-    porcelain = git("-C", work_repo, "status", "--porcelain", "--untracked-files=all")
-    work_files = [ln[3:].strip() for ln in porcelain.splitlines() if ln.strip()]
+    porcelain = git("-C", work_repo, "status", "--porcelain", "-z", "--untracked-files=all")
+    work_files, toks = [], porcelain.split("\0")
+    j = 0
+    while j < len(toks):
+        ent = toks[j]
+        j += 1
+        if len(ent) < 4:
+            continue
+        work_files.append(ent[3:])
+        if ent[0] in "RC":
+            j += 1  # -z puts a rename's source in the next field
+    
     reasons = []
     hits = [p for p in work_files if any(glob_match(g, p) for g in SIGNIFICANCE_PATHS)]
     if hits:
@@ -2301,6 +2743,8 @@ def main(argv):
     p.add_argument("--range")
     p.add_argument("--policy-ref")
     p.add_argument("--quiet", action="store_true")
+    p.add_argument("--require-owned", action="store_true",
+                   help="CI: fail when a path above the auto-merge levels would need no CODEOWNERS review")
 
     p = sub.add_parser("codeowners", help="generate or check .github/CODEOWNERS from roles.json")
     p.add_argument("--write", action="store_true")

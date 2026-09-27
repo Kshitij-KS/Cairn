@@ -74,7 +74,7 @@ def gate(src, base_sha, head_sha, tmp):
     steps["security-tests"] = run([sys.executable, os.path.join(base, "tools", "test_security.py")], tmp,
                                   dict(env, MEMORY_GUARD_UNDER_TEST=os.path.join(head, "scripts", "memory_guard.py")))
     steps["classify"] = run([sys.executable, os.path.join(base, "scripts", "memory_guard.py"), "--notes-root", head,
-                             "classify", "--range", rng, "--policy-ref", base_sha, "--quiet"], tmp, env)
+                             "classify", "--range", rng, "--policy-ref", base_sha, "--quiet", "--require-owned"], tmp, env)
     green = all(rc == 0 for name, (rc, _o) in steps.items() if name != "classify")
     level = steps["classify"][1].strip().splitlines()[0] if steps["classify"][0] == 0 else "ERROR"
     return green, level, steps

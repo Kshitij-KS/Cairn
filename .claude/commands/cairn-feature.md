@@ -1,7 +1,7 @@
 ---
 description: 'List features, or propose a new one with the code paths it covers'
 argument-hint: '[list] | new "<name>" --covers <glob> [--owner handle] [--depends NAME]'
-allowed-tools: 'Bash(uv run -q --script scripts/mem.py:*)'
+allowed-tools: 'Bash(uv run -q --script scripts/mem.py features:*), Bash(uv run -q --script scripts/mem.py feature:*)'
 ---
 
 Arguments: $ARGUMENTS

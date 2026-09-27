@@ -9,7 +9,7 @@ tags: [feature]
 level: L1
 confidentiality: internal
 created: 2026-09-23
-updated: 2026-09-27
+updated: 2026-09-28
 ---
 # Context Protocol
 
@@ -24,6 +24,11 @@ Context Protocol is the reader: `mem load` gives an agent the core, resolves whi
 - [fact] Explain asks that name no feature resolve to a decision; orient adds a confidently resolved feature's card; a symptom with no intent word means debug ^a1d26e
 - [fact] Recall relevance is IDF-weighted over claim texts ^b8fa22
 - [fact] When the kind of task or the feature is unclear, mem load asks the person with ranked options instead of guessing; mem asks reports how often the guesses were corrected ^16bd4f
+- [fact] A near-tie between two features makes mem load ask which one, plan mode included; orient shows both cards ^aa532e
+- [fact] Review loads the target's card and full contract, not its body; explain follows the whole supersede chain ^b28f60
+- [fact] Past 40 features the bundle's feature map lists the ones near the ask and names the rest ^665a97
+- [fact] The rerun line is shell-inert: only words and plain punctuation of the ask survive in it ^934f06
+- [fact] Evals run without the runner's pins and mutes, and a trial fails eval --trial if it removes a passing eval or adds a failing one ^d7ddd7
 
 ## Relations
 - depends_on [[Memory Guard]]

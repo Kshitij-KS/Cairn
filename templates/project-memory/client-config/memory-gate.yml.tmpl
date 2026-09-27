@@ -22,7 +22,7 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     outputs:
-      level: ${{ steps.classify.outputs.level }}
+      level: ${{ steps.classify.outputs.level || steps.bootstrap.outputs.level }}
     env:
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -52,7 +52,12 @@ jobs:
         id: present
         run: |
           if [ -f base/memory/scripts/memory_guard.py ]; then echo "present=true" >> "$GITHUB_OUTPUT"
-          else echo "present=false" >> "$GITHUB_OUTPUT"; echo "::notice::memory/ arrives in this PR; an owner reviews it by hand."; fi
+          else echo "present=false" >> "$GITHUB_OUTPUT"; echo "::warning::memory/ arrives in this PR, so no trusted guard exists to judge it: an owner must review every file by hand."; fi
+
+      - name: The pull request that adds memory/ is labelled L3 (owner review)
+        id: bootstrap
+        if: steps.present.outputs.present != 'true'
+        run: echo "level=L3" >> "$GITHUB_OUTPUT"
 
       - name: Safety, format and per-commit attribution (base guard, base policy, PR data)
         if: steps.present.outputs.present == 'true'
@@ -71,7 +76,7 @@ jobs:
         run: |
           set -euo pipefail
           LEVEL=$(python base/memory/scripts/memory_guard.py --notes-root head/memory \
-            classify --range "$BASE_SHA...$HEAD_SHA" --policy-ref "$BASE_SHA")
+            classify --range "$BASE_SHA...$HEAD_SHA" --policy-ref "$BASE_SHA" --require-owned)
           case "$LEVEL" in L0|L1|L2|L3) ;; *) echo "::error::classifier returned '$LEVEL'"; exit 1 ;; esac
           echo "level=$LEVEL" >> "$GITHUB_OUTPUT"
           echo "This pull request's memory change needs $LEVEL review."

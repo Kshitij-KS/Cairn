@@ -9,7 +9,7 @@ tags: [feature]
 level: L1
 confidentiality: internal
 created: 2026-09-23
-updated: 2026-09-27
+updated: 2026-09-28
 ---
 # Agent Integration
 
@@ -21,6 +21,9 @@ The skill copies under .claude/ and .kiro/ are byte-identical to .agents/skills/
 
 ## Observations
 - [risk] Kiro and Cursor hook and command behaviour is not verified against their current docs ^6dd17c
+- [fact] Each Kiro event is one hook (sync-memory.py pre --then-session, post --significance) so its steps run in a fixed order ^fa4562
+- [fact] Claude Code's allow-list names mem verbs; mem role, playbook approve, core init and codeowners --write are denied ^9e8ff4
+- [fact] A project tier's hooks and commands are derived from the company tier's own files, so the two cannot drift ^234c12
 
 ## Relations
 - depends_on [[Context Protocol]]

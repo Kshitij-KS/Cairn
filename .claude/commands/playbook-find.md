@@ -1,7 +1,7 @@
 ---
 description: 'Find a playbook: a task someone already did with an AI, with their steps and fixes'
 argument-hint: '<words> | --regex <pattern>'
-allowed-tools: 'Bash(uv run -q --script scripts/mem.py:*)'
+allowed-tools: 'Bash(uv run -q --script scripts/mem.py playbook find:*)'
 ---
 
 Find playbooks for: $ARGUMENTS

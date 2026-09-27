@@ -2,9 +2,49 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
-      "Bash(uv run -q --script scripts/sync-memory.py:*)",
-      "Bash(uv run -q --script scripts/memory_guard.py:*)",
-      "Bash(uv run -q --script scripts/mem.py:*)",
+      "Bash(uv run -q --script scripts/sync-memory.py pre:*)",
+      "Bash(uv run -q --script scripts/sync-memory.py post:*)",
+      "Bash(uv run -q --script scripts/sync-memory.py status:*)",
+      "Bash(uv run -q --script scripts/memory_guard.py check:*)",
+      "Bash(uv run -q --script scripts/memory_guard.py stamp:*)",
+      "Bash(uv run -q --script scripts/memory_guard.py classify:*)",
+      "Bash(uv run -q --script scripts/memory_guard.py significance:*)",
+      "Bash(uv run -q --script scripts/mem.py load:*)",
+      "Bash(uv run -q --script scripts/mem.py recall:*)",
+      "Bash(uv run -q --script scripts/mem.py why:*)",
+      "Bash(uv run -q --script scripts/mem.py gap:*)",
+      "Bash(uv run -q --script scripts/mem.py gaps:*)",
+      "Bash(uv run -q --script scripts/mem.py remember:*)",
+      "Bash(uv run -q --script scripts/mem.py status:*)",
+      "Bash(uv run -q --script scripts/mem.py context:*)",
+      "Bash(uv run -q --script scripts/mem.py features:*)",
+      "Bash(uv run -q --script scripts/mem.py brief:*)",
+      "Bash(uv run -q --script scripts/mem.py who:*)",
+      "Bash(uv run -q --script scripts/mem.py can:*)",
+      "Bash(uv run -q --script scripts/mem.py diff:*)",
+      "Bash(uv run -q --script scripts/mem.py eval:*)",
+      "Bash(uv run -q --script scripts/mem.py trials:*)",
+      "Bash(uv run -q --script scripts/mem.py resolve:*)",
+      "Bash(uv run -q --script scripts/mem.py moved:*)",
+      "Bash(uv run -q --script scripts/mem.py session:*)",
+      "Bash(uv run -q --script scripts/mem.py try:*)",
+      "Bash(uv run -q --script scripts/mem.py pin:*)",
+      "Bash(uv run -q --script scripts/mem.py unpin:*)",
+      "Bash(uv run -q --script scripts/mem.py mute:*)",
+      "Bash(uv run -q --script scripts/mem.py unmute:*)",
+      "Bash(uv run -q --script scripts/mem.py asks:*)",
+      "Bash(uv run -q --script scripts/mem.py propose:*)",
+      "Bash(uv run -q --script scripts/mem.py playbook find:*)",
+      "Bash(uv run -q --script scripts/mem.py playbook list:*)",
+      "Bash(uv run -q --script scripts/mem.py playbook show:*)",
+      "Bash(uv run -q --script scripts/mem.py playbook run:*)",
+      "Bash(uv run -q --script scripts/mem.py playbook log:*)",
+      "Bash(uv run -q --script scripts/mem.py playbook caveat:*)",
+      "Bash(uv run -q --script scripts/mem.py playbook begin:*)",
+      "Bash(uv run -q --script scripts/mem.py playbook since:*)",
+      "Bash(uv run -q --script scripts/mem.py playbook export:*)",
+      "Bash(uv run -q --script scripts/mem.py playbook stats:*)",
+      "Bash(uv run -q --script scripts/mem.py playbook save:*)",
       "Bash(git status:*)",
       "Bash(git log:*)",
       "Bash(git diff:*)",
@@ -14,14 +54,19 @@
       "mcp__basic-memory__build_context",
       "mcp__basic-memory__recent_activity",
       "mcp__basic-memory__list_directory",
-      "mcp__basic-memory__list_memory_projects"
+      "mcp__basic-memory__list_memory_projects",
+      "Bash(uv run -q --script scripts/mem.py keep:*)"
     ],
     "deny": [
       "mcp__basic-memory__delete_note",
       "mcp__basic-memory__delete_project",
       "Bash(git push --force:*)",
       "Bash(git push -f:*)",
-      "Bash(git commit --no-verify:*)"
+      "Bash(git commit --no-verify:*)",
+      "Bash(uv run -q --script scripts/mem.py role:*)",
+      "Bash(uv run -q --script scripts/mem.py playbook approve:*)",
+      "Bash(uv run -q --script scripts/mem.py core init:*)",
+      "Bash(uv run -q --script scripts/memory_guard.py codeowners --write:*)"
     ]
   },
   "hooks": {
@@ -88,5 +133,6 @@
         ]
       }
     ]
-  }
+  },
+  "$comment_permissions": "Agents may run the read and L0 verbs without asking (an agent's `keep` writes a proposal, never the change). Changing a role, approving a playbook, initialising CORE and writing CODEOWNERS are a person's acts: denied here, and refused by mem and the guard anyway (recheck 09-F8)."
 }

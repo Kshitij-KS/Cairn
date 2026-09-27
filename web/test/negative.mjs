@@ -107,5 +107,22 @@ const src = JSON.parse(fs.readFileSync(FIX("n1020.json"), "utf8"));
   win.close();
 }
 
+// ...and a SHORT secret name, the class the old 24-character floor could never catch (07-F5)
+{
+  const pub = JSON.parse(fs.readFileSync(FIX("redacted.json"), "utf8"));
+  const full = JSON.parse(fs.readFileSync(FIX("redacted.full.json"), "utf8"));
+  const markers = withheldMarkers(pub, full);
+  const short = markers.filter((m) => m.length < 24);
+  const leaky = JSON.parse(JSON.stringify(pub));
+  leaky.arrangements.area.clusters[0].label = short[0] || "";
+  fs.writeFileSync(path.join(TMP, "leaky-short.json"), JSON.stringify(leaky));
+  const { win, doc } = await boot(path.join(TMP, "leaky-short.json"));
+  await sleep(600);
+  const leaks = privacyLeaks(doc, markers);
+  ok("negative: a short restricted title rendered into the page is caught", short.length > 0 && leaks.length > 0,
+     `${short.length} short markers, ${leaks.length} leak(s)`);
+  win.close();
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

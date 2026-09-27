@@ -1,7 +1,7 @@
 ---
 description: 'Store one durable fact in team memory, routed to the right level automatically'
 argument-hint: '<fact> [--feature NAME] [--category C]'
-allowed-tools: 'Bash(uv run -q --script scripts/mem.py:*)'
+allowed-tools: 'Bash(uv run -q --script scripts/mem.py remember:*)'
 ---
 
 Store this fact: $ARGUMENTS

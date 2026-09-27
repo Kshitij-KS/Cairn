@@ -2,9 +2,9 @@
  "schema": 4,
  "mode": "full",
  "project": "cairn",
- "generated_at": "2026-09-27T22:23:13Z",
- "source_commit": "20a39ca",
- "source_commit_at": "2026-09-27T22:23:13Z",
+ "generated_at": "2026-09-27T22:23:14Z",
+ "source_commit": "fdf8694",
+ "source_commit_at": "2026-09-27T22:23:14Z",
  "repo_url": null,
  "levels": {
   "L0": {
@@ -92,13 +92,13 @@
   "experiments": 0
  },
  "stats": {
-  "notes": 31,
-  "observations": 149,
-  "relations": 88,
+  "notes": 34,
+  "observations": 152,
+  "relations": 92,
   "dependencies": 26,
   "authors": 0,
-  "commits": 1,
-  "claims": 149,
+  "commits": 2,
+  "claims": 152,
   "features": 6,
   "gaps": 0,
   "live_trials": 0,
@@ -245,7 +245,7 @@
    "agent": null,
    "status": null,
    "created": "2026-09-23",
-   "updated": "2026-09-28",
+   "updated": "2026-09-27",
    "age_days": 0,
    "tags": [
     "architecture",
@@ -364,7 +364,7 @@
    "agent": null,
    "status": null,
    "created": "2026-09-27",
-   "updated": "2026-09-28",
+   "updated": "2026-09-27",
    "age_days": 0,
    "tags": [
     "readme",
@@ -792,6 +792,40 @@
    "claims": 5
   },
   {
+   "id": "context/restricted/acme-deal",
+   "path": "context/restricted/acme-deal.md",
+   "title": "Acme Deal",
+   "folder": "context",
+   "type": "context",
+   "level": "L2",
+   "confidentiality": "restricted",
+   "author": null,
+   "updated_by": null,
+   "agent": null,
+   "status": null,
+   "created": "2026-09-27",
+   "updated": "2026-09-27",
+   "age_days": 0,
+   "tags": [
+    "deal"
+   ],
+   "observations": 1,
+   "categories": {
+    "fact": 1
+   },
+   "todos": 0,
+   "review_needed": null,
+   "brief": "Terms under…",
+   "body": "# Acme Deal\n\nTerms under negotiation.\n\n## Observations\n- [fact] the deal is not public ^98011c\n\n## Relations\n- relates_to [[Core]]",
+   "observation_list": [
+    {
+     "category": "fact",
+     "text": "the deal is not public ^98011c"
+    }
+   ],
+   "claims": 1
+  },
+  {
    "id": "decisions/ADR-000-template",
    "path": "decisions/ADR-000-template.md",
    "title": "ADR-000 Template",
@@ -1081,7 +1115,7 @@
    "agent": null,
    "status": "proposed",
    "created": "2026-09-28",
-   "updated": "2026-09-28",
+   "updated": "2026-09-27",
    "age_days": 0,
    "tags": [
     "adr",
@@ -1116,6 +1150,40 @@
     }
    ],
    "claims": 4
+  },
+  {
+   "id": "decisions/ADR-777-project-nightjar",
+   "path": "decisions/ADR-777-project-nightjar.md",
+   "title": "ADR-777 Project Nightjar",
+   "folder": "decisions",
+   "type": "decision",
+   "level": "L2",
+   "confidentiality": "internal",
+   "author": null,
+   "updated_by": null,
+   "agent": null,
+   "status": "accepted",
+   "created": "2026-09-27",
+   "updated": "2026-09-27",
+   "age_days": 0,
+   "tags": [
+    "decision"
+   ],
+   "observations": 1,
+   "categories": {
+    "decision": 1
+   },
+   "todos": 0,
+   "review_needed": null,
+   "brief": "We decided…",
+   "body": "# ADR-777 Project Nightjar\n\nWe decided something.\n\n## Observations\n- [decision] the codename stays internal ^2a39be\n\n## Relations\n- relates_to [[Core]]",
+   "observation_list": [
+    {
+     "category": "decision",
+     "text": "the codename stays internal ^2a39be"
+    }
+   ],
+   "claims": 1
   },
   {
    "id": "decisions/README",
@@ -1263,6 +1331,40 @@
     }
    ],
    "claims": 6
+  },
+  {
+   "id": "log/journal/2026-09-20-weekly-links",
+   "path": "log/journal/2026-09-20-weekly-links.md",
+   "title": "Weekly Links",
+   "folder": "log",
+   "type": "note",
+   "level": "L0",
+   "confidentiality": "internal",
+   "author": null,
+   "updated_by": null,
+   "agent": null,
+   "status": null,
+   "created": "2026-09-27",
+   "updated": "2026-09-27",
+   "age_days": 0,
+   "tags": [
+    "links"
+   ],
+   "observations": 1,
+   "categories": {
+    "fact": 1
+   },
+   "todos": 0,
+   "review_needed": null,
+   "brief": "A journal note that links to…",
+   "body": "# Weekly Links\n\nA journal note that links to both.\n\n## Observations\n- [fact] it links ^33fa07\n\n## Relations\n- relates_to [[Acme Deal]]\n- relates_to [[ADR-777 Project Nightjar]]",
+   "observation_list": [
+    {
+     "category": "fact",
+     "text": "it links ^33fa07"
+    }
+   ],
+   "claims": 1
   },
   {
    "id": "log/journal/2026-09-22-basic-memory-stale-index-after-path-change",
@@ -1470,7 +1572,7 @@
    "agent": null,
    "status": "live",
    "created": "2026-09-23",
-   "updated": "2026-09-28",
+   "updated": "2026-09-27",
    "age_days": 0,
    "tags": [
     "feature"
@@ -1530,7 +1632,7 @@
    "agent": null,
    "status": "live",
    "created": "2026-09-23",
-   "updated": "2026-09-28",
+   "updated": "2026-09-27",
    "age_days": 0,
    "tags": [
     "feature"
@@ -1605,7 +1707,7 @@
    "agent": null,
    "status": "live",
    "created": "2026-09-23",
-   "updated": "2026-09-28",
+   "updated": "2026-09-27",
    "age_days": 0,
    "tags": [
     "feature"
@@ -1667,7 +1769,7 @@
    "agent": null,
    "status": "live",
    "created": "2026-09-23",
-   "updated": "2026-09-28",
+   "updated": "2026-09-27",
    "age_days": 0,
    "tags": [
     "feature"
@@ -1744,7 +1846,7 @@
    "agent": null,
    "status": "live",
    "created": "2026-09-23",
-   "updated": "2026-09-28",
+   "updated": "2026-09-27",
    "age_days": 0,
    "tags": [
     "feature"
@@ -1813,7 +1915,7 @@
    "agent": null,
    "status": "live",
    "created": "2026-09-23",
-   "updated": "2026-09-28",
+   "updated": "2026-09-27",
    "age_days": 0,
    "tags": [
     "feature"
@@ -1869,7 +1971,7 @@
    "agent": null,
    "status": null,
    "created": "2026-09-28",
-   "updated": "2026-09-28",
+   "updated": "2026-09-27",
    "age_days": 0,
    "tags": [
     "playbooks",
@@ -2112,6 +2214,12 @@
    "dependency": false
   },
   {
+   "source": "context/restricted/acme-deal",
+   "target": "CORE",
+   "type": "relates_to",
+   "dependency": false
+  },
+  {
    "source": "decisions/ADR-000-template",
    "target": "context/architecture",
    "type": "relates_to",
@@ -2202,6 +2310,12 @@
    "dependency": false
   },
   {
+   "source": "decisions/ADR-777-project-nightjar",
+   "target": "CORE",
+   "type": "relates_to",
+   "dependency": false
+  },
+  {
    "source": "decisions/README",
    "target": "context/conventions",
    "type": "relates_to",
@@ -2246,6 +2360,18 @@
   {
    "source": "log/README",
    "target": "governance/SIGNIFICANCE",
+   "type": "relates_to",
+   "dependency": false
+  },
+  {
+   "source": "log/journal/2026-09-20-weekly-links",
+   "target": "context/restricted/acme-deal",
+   "type": "relates_to",
+   "dependency": false
+  },
+  {
+   "source": "log/journal/2026-09-20-weekly-links",
+   "target": "decisions/ADR-777-project-nightjar",
    "type": "relates_to",
    "dependency": false
   },
@@ -2469,8 +2595,8 @@
        0.0292
       ]
      },
-     "x": 62.01,
-     "y": 345.82,
+     "x": 223.36,
+     "y": 341.75,
      "r": 111.55,
      "sample": [
       [
@@ -2550,8 +2676,8 @@
        0.2231
       ]
      },
-     "x": 46.47,
-     "y": -418.78,
+     "x": -409.79,
+     "y": 137.73,
      "r": 124.0,
      "sample": [
       [
@@ -2602,84 +2728,126 @@
      "children": []
     },
     {
+     "id": "area:context/restricted",
+     "label": "Restricted",
+     "count": 1,
+     "levels": {
+      "L2": 1
+     },
+     "observations": 1,
+     "review_needed": 0,
+     "todos": 0,
+     "newest_days": 0,
+     "oldest_days": 0,
+     "pos": {
+      "context/restricted/acme-deal": [
+       0.8675,
+       0.0
+      ]
+     },
+     "x": 30.46,
+     "y": 192.96,
+     "r": 64.0,
+     "sample": [
+      [
+       0.868,
+       0.0,
+       2
+      ]
+     ],
+     "members": [
+      "context/restricted/acme-deal"
+     ],
+     "children": []
+    },
+    {
      "id": "area:decisions",
      "label": "Decisions",
-     "count": 7,
+     "count": 8,
      "levels": {
-      "L2": 7
+      "L2": 8
      },
-     "observations": 35,
+     "observations": 36,
      "review_needed": 0,
      "todos": 0,
      "newest_days": 0,
      "oldest_days": 0,
      "pos": {
       "decisions/ADR-000-template": [
-       0.0572,
-       -0.0649
+       0.1197,
+       -0.0484
       ],
       "decisions/ADR-001-shared-memory-system": [
-       -0.2988,
-       0.1208
+       -0.2336,
+       0.2716
       ],
       "decisions/ADR-002-memory-governance-and-access-tiers": [
-       -0.046,
-       -0.6633
+       0.0045,
+       -0.6682
       ],
       "decisions/ADR-003-claims-recall-and-trials": [
-       0.2072,
-       0.3243
+       0.3601,
+       0.482
       ],
       "decisions/ADR-004-context-protocol": [
-       -0.3704,
-       -0.2858
+       -0.3663,
+       -0.1901
       ],
       "decisions/ADR-005-playbooks": [
-       0.4722,
-       -0.0336
+       0.6031,
+       0.0557
+      ],
+      "decisions/ADR-777-project-nightjar": [
+       -0.0415,
+       0.6382
       ],
       "decisions/README": [
-       0.0155,
-       0.7898
+       -0.5722,
+       -0.6543
       ]
      },
-     "x": -266.71,
-     "y": 235.51,
-     "r": 124.0,
+     "x": 135.8,
+     "y": -356.92,
+     "r": 129.1,
      "sample": [
       [
-       0.057,
-       -0.065,
+       0.12,
+       -0.048,
        2
       ],
       [
-       -0.299,
-       0.121,
+       -0.234,
+       0.272,
        2
       ],
       [
-       -0.046,
-       -0.663,
+       0.004,
+       -0.668,
        2
       ],
       [
-       0.207,
-       0.324,
+       0.36,
+       0.482,
        2
       ],
       [
-       -0.37,
-       -0.286,
+       -0.366,
+       -0.19,
        2
       ],
       [
-       0.472,
-       -0.034,
+       0.603,
+       0.056,
        2
       ],
       [
-       0.015,
-       0.79,
+       -0.042,
+       0.638,
+       2
+      ],
+      [
+       -0.572,
+       -0.654,
        2
       ]
      ],
@@ -2690,6 +2858,7 @@
       "decisions/ADR-003-claims-recall-and-trials",
       "decisions/ADR-004-context-protocol",
       "decisions/ADR-005-playbooks",
+      "decisions/ADR-777-project-nightjar",
       "decisions/README"
      ],
      "children": []
@@ -2712,8 +2881,8 @@
        0.0
       ]
      },
-     "x": 304.65,
-     "y": -21.22,
+     "x": -116.95,
+     "y": -266.5,
      "r": 64.0,
      "sample": [
       [
@@ -2745,8 +2914,8 @@
        0.0
       ]
      },
-     "x": -36.44,
-     "y": 122.62,
+     "x": 223.55,
+     "y": 97.51,
      "r": 64.0,
      "sample": [
       [
@@ -2763,32 +2932,42 @@
     {
      "id": "area:log/journal",
      "label": "Journal",
-     "count": 1,
+     "count": 2,
      "levels": {
-      "L0": 1
+      "L0": 2
      },
-     "observations": 5,
+     "observations": 6,
      "review_needed": 0,
      "todos": 0,
      "newest_days": 0,
      "oldest_days": 0,
      "pos": {
-      "log/journal/2026-09-22-basic-memory-stale-index-after-path-change": [
-       0.822,
+      "log/journal/2026-09-20-weekly-links": [
+       0.6316,
        0.0
+      ],
+      "log/journal/2026-09-22-basic-memory-stale-index-after-path-change": [
+       -0.8066,
+       0.7389
       ]
      },
-     "x": -148.52,
-     "y": -244.66,
-     "r": 64.0,
+     "x": -244.69,
+     "y": -85.63,
+     "r": 81.55,
      "sample": [
       [
-       0.822,
+       0.632,
        0.0,
+       0
+      ],
+      [
+       -0.807,
+       0.739,
        0
       ]
      ],
      "members": [
+      "log/journal/2026-09-20-weekly-links",
       "log/journal/2026-09-22-basic-memory-stale-index-after-path-change"
      ],
      "children": []
@@ -2815,8 +2994,8 @@
        0.4369
       ]
      },
-     "x": -191.36,
-     "y": -29.5,
+     "x": 288.13,
+     "y": -114.67,
      "r": 81.55,
      "sample": [
       [
@@ -2874,8 +3053,8 @@
        0.1507
       ]
      },
-     "x": 67.46,
-     "y": -112.27,
+     "x": 25.82,
+     "y": -60.44,
      "r": 118.22,
      "sample": [
       [
@@ -2937,8 +3116,8 @@
        0.0
       ]
      },
-     "x": 165.44,
-     "y": 122.73,
+     "x": -157.36,
+     "y": 116.39,
      "r": 64.0,
      "sample": [
       [
@@ -2957,7 +3136,7 @@
     {
      "source": "area:decisions",
      "target": "overview",
-     "weight": 12,
+     "weight": 13,
      "dependency": 1
     },
     {
@@ -3027,8 +3206,26 @@
      "dependency": 0
     },
     {
+     "source": "area:context/restricted",
+     "target": "overview",
+     "weight": 1,
+     "dependency": 0
+    },
+    {
+     "source": "area:context/restricted",
+     "target": "area:log/journal",
+     "weight": 1,
+     "dependency": 0
+    },
+    {
      "source": "area:decisions",
      "target": "area:log",
+     "weight": 1,
+     "dependency": 0
+    },
+    {
+     "source": "area:decisions",
+     "target": "area:log/journal",
      "weight": 1,
      "dependency": 0
     },
@@ -3065,338 +3262,586 @@
     {
      "id": "time:2026-09",
      "label": "Sep 2026",
-     "count": 31,
+     "count": 34,
      "levels": {
-      "L2": 18,
+      "L2": 20,
       "L3": 3,
-      "L0": 4,
+      "L0": 5,
       "L1": 6
      },
-     "observations": 149,
+     "observations": 152,
      "review_needed": 0,
      "todos": 14,
      "newest_days": 0,
      "oldest_days": 0,
-     "pos": {
-      "ARCHITECTURE": [
-       0.3047,
-       -0.4159
-      ],
-      "CLAUDE": [
-       0.1598,
-       0.677
-      ],
-      "CORE": [
-       -0.1297,
-       0.3686
-      ],
-      "README": [
-       -0.1844,
-       0.1066
-      ],
-      "RUNBOOK": [
-       -0.6663,
-       0.0364
-      ],
-      "context/architecture": [
-       -0.1614,
-       -0.4018
-      ],
-      "context/company": [
-       -0.3949,
-       -0.2965
-      ],
-      "context/conventions": [
-       0.4559,
-       -0.2683
-      ],
-      "context/glossary": [
-       0.7326,
-       0.1452
-      ],
-      "context/product": [
-       -0.6089,
-       -0.234
-      ],
-      "context/roles": [
-       0.1004,
-       -0.545
-      ],
-      "context/tooling-stack": [
-       0.4706,
-       0.3505
-      ],
-      "decisions/ADR-000-template": [
-       -0.8577,
-       -0.1237
-      ],
-      "decisions/ADR-001-shared-memory-system": [
-       0.6888,
-       -0.158
-      ],
-      "decisions/ADR-002-memory-governance-and-access-tiers": [
-       0.4612,
-       0.0671
-      ],
-      "decisions/ADR-003-claims-recall-and-trials": [
-       -0.1285,
-       -0.6424
-      ],
-      "decisions/ADR-004-context-protocol": [
-       -0.0429,
-       0.1387
-      ],
-      "decisions/ADR-005-playbooks": [
-       -0.0869,
-       0.6525
-      ],
-      "decisions/README": [
-       0.2857,
-       -0.7252
-      ],
-      "projects/README": [
-       0.3659,
-       0.6066
-      ],
-      "log/README": [
-       -0.3959,
-       -0.5116
-      ],
-      "log/journal/2026-09-22-basic-memory-stale-index-after-path-change": [
-       0.6587,
-       0.6285
-      ],
-      "governance/ACCESS": [
-       0.0966,
-       0.5147
-      ],
-      "governance/SIGNIFICANCE": [
-       0.0579,
-       -0.3819
-      ],
-      "features/agent-integration": [
-       -0.2155,
-       -0.1532
-      ],
-      "features/context-protocol": [
-       -0.4216,
-       0.3145
-      ],
-      "features/memory-atlas": [
-       0.2695,
-       -0.1084
-      ],
-      "features/memory-guard": [
-       0.2414,
-       0.2251
-      ],
-      "features/memory-sync": [
-       -0.4056,
-       -0.0253
-      ],
-      "features/project-scaffolding": [
-       -0.0071,
-       -0.0613
-      ],
-      "playbooks/README": [
-       -0.7286,
-       0.2936
-      ]
-     },
-     "r": 184.0,
+     "r": 187.88,
      "x": -0.5,
-     "y": -62.56,
+     "y": -63.88,
      "sample": [
       [
-       0.305,
-       -0.416,
+       0.493,
+       -0.146,
        2
       ],
       [
-       0.16,
-       0.677,
+       0.183,
+       -0.173,
        3
       ],
       [
-       -0.13,
-       0.369,
+       0.447,
+       -0.345,
        2
       ],
       [
-       -0.184,
-       0.107,
+       0.371,
+       -0.037,
        2
       ],
       [
-       -0.666,
-       0.036,
+       0.213,
+       -0.242,
        2
       ],
       [
-       -0.161,
-       -0.402,
+       0.565,
+       -0.176,
        2
       ],
       [
-       -0.395,
-       -0.296,
+       0.45,
+       -0.069,
        2
       ],
       [
-       0.456,
-       -0.268,
+       0.516,
+       -0.245,
        2
       ],
       [
-       0.733,
-       0.145,
+       0.696,
+       -0.257,
        2
       ],
       [
-       -0.609,
-       -0.234,
+       0.316,
+       -0.244,
        2
       ],
       [
-       0.1,
-       -0.545,
+       0.195,
+       -0.09,
        2
       ],
       [
-       0.471,
-       0.35,
+       0.531,
+       -0.019,
        2
       ],
       [
-       -0.858,
-       -0.124,
+       0.158,
+       -0.291,
        2
       ],
       [
-       0.689,
-       -0.158,
+       0.642,
+       -0.35,
        2
       ],
       [
-       0.461,
-       0.067,
+       0.283,
+       -0.066,
        2
       ],
       [
-       -0.129,
-       -0.642,
+       0.336,
+       -0.31,
        2
       ],
       [
-       -0.043,
-       0.139,
+       0.608,
+       -0.09,
        2
       ],
       [
-       -0.087,
-       0.652,
+       0.351,
+       -0.091,
        2
       ],
       [
-       0.286,
-       -0.725,
+       0.589,
+       -0.257,
        2
       ],
       [
-       0.366,
-       0.607,
+       0.525,
+       -0.11,
+       2
+      ],
+      [
+       0.222,
+       -0.328,
+       2
+      ],
+      [
+       0.654,
+       -0.169,
        0
       ],
       [
-       -0.396,
-       -0.512,
+       0.285,
+       0.016,
        0
       ],
       [
-       0.659,
-       0.628,
+       0.277,
+       -0.389,
        0
       ],
       [
-       0.097,
-       0.515,
+       0.387,
+       0.053,
+       0
+      ],
+      [
+       0.275,
+       -0.177,
        3
       ],
       [
-       0.058,
-       -0.382,
+       0.417,
+       -0.143,
        3
       ],
       [
-       -0.215,
-       -0.153,
+       0.539,
+       -0.333,
        1
       ],
       [
-       -0.422,
-       0.315,
+       0.436,
+       -0.263,
        1
       ],
       [
-       0.27,
-       -0.108,
+       0.564,
+       -0.43,
        1
       ],
       [
-       0.241,
-       0.225,
+       0.352,
+       -0.436,
        1
       ],
       [
-       -0.406,
-       -0.025,
+       0.469,
+       -0.464,
        1
       ],
       [
-       -0.007,
-       -0.061,
+       -0.32,
+       0.21,
        1
       ],
       [
-       -0.729,
-       0.294,
+       -0.54,
+       0.323,
        0
       ]
      ],
-     "members": [
-      "ARCHITECTURE",
-      "CLAUDE",
-      "CORE",
-      "README",
-      "RUNBOOK",
-      "context/architecture",
-      "context/company",
-      "context/conventions",
-      "context/glossary",
-      "context/product",
-      "context/roles",
-      "context/tooling-stack",
-      "decisions/ADR-000-template",
-      "decisions/ADR-001-shared-memory-system",
-      "decisions/ADR-002-memory-governance-and-access-tiers",
-      "decisions/ADR-003-claims-recall-and-trials",
-      "decisions/ADR-004-context-protocol",
-      "decisions/ADR-005-playbooks",
-      "decisions/README",
-      "projects/README",
-      "log/README",
-      "log/journal/2026-09-22-basic-memory-stale-index-after-path-change",
-      "governance/ACCESS",
-      "governance/SIGNIFICANCE",
-      "features/agent-integration",
-      "features/context-protocol",
-      "features/memory-atlas",
-      "features/memory-guard",
-      "features/memory-sync",
-      "features/project-scaffolding",
-      "playbooks/README"
-     ],
-     "children": []
+     "members": [],
+     "children": [
+      {
+       "id": "time:2026-09/0",
+       "label": "Sep 2026, part 1",
+       "count": 32,
+       "levels": {
+        "L2": 20,
+        "L3": 3,
+        "L0": 4,
+        "L1": 5
+       },
+       "observations": 146,
+       "review_needed": 0,
+       "todos": 14,
+       "newest_days": 0,
+       "oldest_days": 0,
+       "pos": {
+        "ARCHITECTURE": [
+         0.2245,
+         0.1798
+        ],
+        "CLAUDE": [
+         -0.6881,
+         0.1007
+        ],
+        "CORE": [
+         0.0894,
+         -0.4041
+        ],
+        "README": [
+         -0.1342,
+         0.5018
+        ],
+        "RUNBOOK": [
+         -0.5977,
+         -0.1034
+        ],
+        "context/architecture": [
+         0.4368,
+         0.0907
+        ],
+        "context/company": [
+         0.0988,
+         0.4057
+        ],
+        "context/conventions": [
+         0.2915,
+         -0.1098
+        ],
+        "context/glossary": [
+         0.8219,
+         -0.1459
+        ],
+        "context/product": [
+         -0.296,
+         -0.1093
+        ],
+        "context/roles": [
+         -0.653,
+         0.3439
+        ],
+        "context/tooling-stack": [
+         0.3345,
+         0.5526
+        ],
+        "context/restricted/acme-deal": [
+         -0.7622,
+         -0.2472
+        ],
+        "decisions/ADR-000-template": [
+         0.6631,
+         -0.4192
+        ],
+        "decisions/ADR-001-shared-memory-system": [
+         -0.3941,
+         0.4158
+        ],
+        "decisions/ADR-002-memory-governance-and-access-tiers": [
+         -0.2361,
+         -0.3008
+        ],
+        "decisions/ADR-003-claims-recall-and-trials": [
+         0.5616,
+         0.3464
+        ],
+        "decisions/ADR-004-context-protocol": [
+         -0.1935,
+         0.3413
+        ],
+        "decisions/ADR-005-playbooks": [
+         0.5084,
+         -0.1449
+        ],
+        "decisions/ADR-777-project-nightjar": [
+         0.318,
+         0.2867
+        ],
+        "decisions/README": [
+         -0.5715,
+         -0.3536
+        ],
+        "projects/README": [
+         0.6965,
+         0.1124
+        ],
+        "log/README": [
+         -0.3857,
+         0.6563
+        ],
+        "log/journal/2026-09-20-weekly-links": [
+         -0.4122,
+         -0.5339
+        ],
+        "log/journal/2026-09-22-basic-memory-stale-index-after-path-change": [
+         -0.0883,
+         0.7655
+        ],
+        "governance/ACCESS": [
+         -0.4159,
+         0.0878
+        ],
+        "governance/SIGNIFICANCE": [
+         0.0013,
+         0.1896
+        ],
+        "features/agent-integration": [
+         0.3586,
+         -0.3687
+        ],
+        "features/context-protocol": [
+         0.0579,
+         -0.1648
+        ],
+        "features/memory-atlas": [
+         0.4334,
+         -0.6548
+        ],
+        "features/memory-guard": [
+         -0.1897,
+         -0.6726
+        ],
+        "features/memory-sync": [
+         0.1528,
+         -0.7544
+        ]
+       },
+       "x": 122.11,
+       "y": -60.76,
+       "r": 151.97,
+       "sample": [
+        [
+         0.225,
+         0.18,
+         2
+        ],
+        [
+         -0.688,
+         0.101,
+         3
+        ],
+        [
+         0.089,
+         -0.404,
+         2
+        ],
+        [
+         -0.134,
+         0.502,
+         2
+        ],
+        [
+         -0.598,
+         -0.103,
+         2
+        ],
+        [
+         0.437,
+         0.091,
+         2
+        ],
+        [
+         0.099,
+         0.406,
+         2
+        ],
+        [
+         0.291,
+         -0.11,
+         2
+        ],
+        [
+         0.822,
+         -0.146,
+         2
+        ],
+        [
+         -0.296,
+         -0.109,
+         2
+        ],
+        [
+         -0.653,
+         0.344,
+         2
+        ],
+        [
+         0.335,
+         0.553,
+         2
+        ],
+        [
+         -0.762,
+         -0.247,
+         2
+        ],
+        [
+         0.663,
+         -0.419,
+         2
+        ],
+        [
+         -0.394,
+         0.416,
+         2
+        ],
+        [
+         -0.236,
+         -0.301,
+         2
+        ],
+        [
+         0.562,
+         0.346,
+         2
+        ],
+        [
+         -0.194,
+         0.341,
+         2
+        ],
+        [
+         0.508,
+         -0.145,
+         2
+        ],
+        [
+         0.318,
+         0.287,
+         2
+        ],
+        [
+         -0.572,
+         -0.354,
+         2
+        ],
+        [
+         0.697,
+         0.112,
+         0
+        ],
+        [
+         -0.386,
+         0.656,
+         0
+        ],
+        [
+         -0.412,
+         -0.534,
+         0
+        ],
+        [
+         -0.088,
+         0.765,
+         0
+        ],
+        [
+         -0.416,
+         0.088,
+         3
+        ],
+        [
+         0.001,
+         0.19,
+         3
+        ],
+        [
+         0.359,
+         -0.369,
+         1
+        ],
+        [
+         0.058,
+         -0.165,
+         1
+        ],
+        [
+         0.433,
+         -0.655,
+         1
+        ],
+        [
+         -0.19,
+         -0.673,
+         1
+        ],
+        [
+         0.153,
+         -0.754,
+         1
+        ]
+       ],
+       "members": [
+        "ARCHITECTURE",
+        "CLAUDE",
+        "CORE",
+        "README",
+        "RUNBOOK",
+        "context/architecture",
+        "context/company",
+        "context/conventions",
+        "context/glossary",
+        "context/product",
+        "context/roles",
+        "context/tooling-stack",
+        "context/restricted/acme-deal",
+        "decisions/ADR-000-template",
+        "decisions/ADR-001-shared-memory-system",
+        "decisions/ADR-002-memory-governance-and-access-tiers",
+        "decisions/ADR-003-claims-recall-and-trials",
+        "decisions/ADR-004-context-protocol",
+        "decisions/ADR-005-playbooks",
+        "decisions/ADR-777-project-nightjar",
+        "decisions/README",
+        "projects/README",
+        "log/README",
+        "log/journal/2026-09-20-weekly-links",
+        "log/journal/2026-09-22-basic-memory-stale-index-after-path-change",
+        "governance/ACCESS",
+        "governance/SIGNIFICANCE",
+        "features/agent-integration",
+        "features/context-protocol",
+        "features/memory-atlas",
+        "features/memory-guard",
+        "features/memory-sync"
+       ],
+       "children": []
+      },
+      {
+       "id": "time:2026-09/1",
+       "label": "Sep 2026, part 2",
+       "count": 2,
+       "levels": {
+        "L1": 1,
+        "L0": 1
+       },
+       "observations": 6,
+       "review_needed": 0,
+       "todos": 0,
+       "newest_days": 0,
+       "oldest_days": 0,
+       "pos": {
+        "features/project-scaffolding": [
+         0.6466,
+         0.0
+        ],
+        "playbooks/README": [
+         -0.8258,
+         0.7565
+        ]
+       },
+       "x": -122.26,
+       "y": 61.54,
+       "r": 66.87,
+       "sample": [
+        [
+         0.647,
+         0.0,
+         1
+        ],
+        [
+         -0.826,
+         0.756,
+         0
+        ]
+       ],
+       "members": [
+        "features/project-scaffolding",
+        "playbooks/README"
+       ],
+       "children": []
+      }
+     ]
     }
    ],
    "edges": [],
@@ -3404,6 +3849,38 @@
   }
  },
  "activity": [
+  {
+   "sha": "fdf8694f",
+   "author": "Cairn",
+   "at": "2026-09-28T03:53:14",
+   "level": "L2",
+   "actor": "human",
+   "agent": null,
+   "files": 13,
+   "paths": [
+    "ARCHITECTURE.md",
+    "README.md",
+    "context/restricted/acme-deal.md",
+    "decisions/ADR-005-playbooks.md",
+    "decisions/ADR-777-project-nightjar.md",
+    "features/agent-integration.md"
+   ],
+   "touched": [
+    "ARCHITECTURE.md",
+    "README.md",
+    "context/restricted/acme-deal.md",
+    "decisions/ADR-005-playbooks.md",
+    "decisions/ADR-777-project-nightjar.md",
+    "features/agent-integration.md",
+    "features/context-protocol.md",
+    "features/memory-atlas.md",
+    "features/memory-guard.md",
+    "features/memory-sync.md",
+    "features/project-scaffolding.md",
+    "log/journal/2026-09-20-weekly-links.md"
+   ],
+   "message": "redacted corpus"
+  },
   {
    "sha": "20a39ca6",
    "author": "Cairn",

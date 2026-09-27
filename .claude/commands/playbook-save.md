@@ -1,7 +1,7 @@
 ---
 description: 'Save the task you just finished as a playbook a teammate''s AI can walk them through'
 argument-hint: '[title]'
-allowed-tools: 'Bash(uv run -q --script scripts/mem.py:*)'
+allowed-tools: 'Bash(uv run -q --script scripts/mem.py playbook since:*), Bash(uv run -q --script scripts/mem.py playbook save:*)'
 ---
 
 Save what this session just did as a playbook: $ARGUMENTS

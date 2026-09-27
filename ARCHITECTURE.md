@@ -5,7 +5,7 @@ tags: [architecture, audit, canonical]
 level: L2
 confidentiality: internal
 created: 2026-09-23
-updated: 2026-09-27
+updated: 2026-09-28
 ---
 # System Architecture
 
@@ -20,8 +20,11 @@ several controls this document had called hard gates were client-side, self-auth
 fail-open or bypassable. Its reports are not part of this repository; finding ids such as `01-F1`
 or "area 06" in code comments and tests refer to them. Phases 0-2 of its remediation are done: containment,
 a trusted-base security boundary, a closed publication schema, repaired sync, and concurrency-safe
-local state. Phases 3-4 (claim-id integrity, retrieval quality, scaffolding)
-are NOT done; their open items are listed in section 10.
+local state. **On 2026-09-28 a re-check of every finding against the code** found the open Phase 3-4
+items plus new ones (a non-ASCII path skipping every guard check, executable and instruction files
+outside the protected floor, a note's author being reassignable, Atlas leaks through titles and
+activity, sync failures after a squash merge). All of them are fixed, each with a regression test
+that was run against the code before the fix and failed; section 10 lists what remains by design.
 
 What is still true regardless: **nothing here is a security boundary until the repository is on
 GitHub with branch protection on `main` requiring Code Owner review and the `memory-gate` check.**
@@ -170,20 +173,34 @@ read as a real claim or relation (fixed after it produced phantom broken links; 
 ### 3.4 Claims and their ids
 
 A **claim** is an observation line `- [category] text ^id`. The id is six hex characters of
-`sha1(note_id + "\n" + normalised text)`, with a `#n` suffix on collision.
+`sha1(note_id + "\n" + text)`, the text Unicode-normalised (NFKC) and case-folded, so NFC and NFD
+spellings of one line agree; a new id is never one used anywhere in the tier, now or at `HEAD`.
+
+The rule behind every choice below: a LOST id is visible and can be put back; a TRANSFERRED id is
+silent, and every pin, eval and trial then points at the wrong fact. So carrying an id forward must
+be close and unambiguous, or it does not happen. **[verified, tools/test_claims.py]**
 
 - **Assignment**: `memory_guard.py stamp` gives unmarked claims an id. `sync-memory post` runs it
   before every commit.
-- **Carry-forward**: when a claim is edited, stamp compares the new unmarked line with the claims
-  that disappeared from `HEAD`'s version of the note. It keeps the old id if similarity (the max of
-  token Jaccard and `difflib` ratio) is at least **0.5**, or if exactly one id vanished and exactly
-  one unmarked line appeared (a one-for-one swap). Measured: 4 of 5 realistic rewordings keep their
-  id at the threshold; a full rewrite gets a new id **[verified, test_guard]**.
-- **References**: a line that ends with another note's id (`includes ^be2885`) is treated as a
-  reference and gets its own id appended. Writing references in parentheses avoids the ambiguity
-  (`includes (^be2885)`). An id used by claims in two notes fails the check.
-- **Retirement**: `mem retire ^id` moves the line to `## Retired` with `(retired DATE: why)`; it is
-  kept for history and excluded from recall.
+- **Carry-forward**: an unmarked line is compared with the claims that disappeared from `HEAD`'s
+  version of the note. Pairs are taken best first; a pair is kept only if it reaches similarity
+  **0.5** (the highest of token Jaccard with light stemming, containment and `difflib` ratio) AND
+  exceeds every rival for either side by 0.08 on a stricter score (the mean of Jaccard and ratio), and
+  a changed category counts against it. There is no one-for-one rule: an unrelated line that
+  replaces a deleted one gets a new id (02-F3), and two reordered, edited lines keep their own
+  (02-F2). A claim that left one note and appears nearly unchanged (0.8) in another note of the
+  same change keeps its id (02-F4).
+- **Loss is reported**: the guard warns `claim id(s) gone from this note` naming them. The recheck's
+  20 deep paraphrases keep 9 ids and move none; the rest need a person to put the old `^id` back.
+- **Collisions and references**: a line ending with another note's id is an eval reference
+  (`includes ^be2885`, kept, with its own id appended) or a collision. In a collision the claim the
+  tier had at `HEAD` keeps the id and the newcomer gets a new one; the old repair did the opposite and
+  silently moved every reference (02-F6). `stamp --all` repairs it; the guard fails until then.
+- **Malformed ids** (`^ABCDEF`, `^12345g`): stamp normalises a recognisable one and replaces the rest;
+  the guard warns about any left (02-F9).
+- **Retirement**: `mem retire ^id` moves the line to `## Retired` with `(retired DATE: why)`. The id
+  still belongs to that line, is never stamped again or reused (02-F5), and is excluded from recall.
+  `mem why ^id` says "retired" only for such a line; an id that is merely cited says so.
 
 ### 3.5 Relations and direction
 
@@ -234,8 +251,22 @@ and working-tree checks, the merge base for `--range`, or `--policy-ref` / `MEMO
 working copy is used only when there is no commit yet. While `roles.json` itself is changing, a path
 needs the level **both** policies require. On top of any policy, a hard-coded **protected floor**
 keeps `governance/`, `scripts/`, `tools/`, `.github/`, `.claude/`, `.kiro/`, `.cursor/`, `.agents/`,
-`web/`, `CLAUDE.md`, `CODEOWNERS` and deployment config at L3 (`web/data/**` stays bot-only). A policy
+`web/`, `CLAUDE.md`, `CODEOWNERS` and deployment config at L3 (`web/data/**` stays bot-only), and a
+**structural floor** holds by what a path IS, wherever it sits: any dot-file or dot-folder segment
+(`.vscode`, `.envrc`, `.githooks`, `.gitattributes`, ...), any non-Markdown file at the tier root,
+agent instruction files at any depth (`AGENTS.md`, `GEMINI.md`, a nested `CLAUDE.md`), script,
+build and configuration files at any depth, template hooks, and names a filesystem could resolve
+differently than they are classified (control or invisible characters, `:` streams, a trailing dot
+or space, 8.3 names like `SCRIPT~1`) are all L3; so is a symbolic link or submodule pointer
+(recheck U3). A name list is always one entry short, so the floor does not depend on one. A policy
 that is empty, partial, has a catch-all rule, or gives agents more than L0 is refused (exit 6).
+`.memory/` (mem's per-machine state) is refused for everyone (`LOCAL-STATE`).
+
+**What is judged is what is committed.** git's file listings are read NUL-separated with
+`core.quotePath=false`: with git's defaults a non-ASCII name came back quoted and escaped, matched
+no rule and passed as L0, and a secret in `café.md` was never scanned (recheck U1). `check
+--staged` reads the index and `--range` the head of the range, not the working tree, so a staged
+file that was edited or deleted on disk is still checked.
 
 **Paths are normalised before matching** (01-F4): separators, `.`/`..` segments, Unicode NFKC and
 case are folded, so `Context/x`, `context\x` and a long-s `\u017fcripts/` are all classified as the
@@ -243,8 +274,9 @@ protected folder. **A rename counts as a deletion of its source** (01-F3), so mo
 `log/journal/` needs the source's level.
 
 **Attribution** (01-F5/F6, 10-F3): a new note's `author` is set from git by `stamp` and checked
-against the introducing identity; in range mode every changed note is checked against the author
-of the last commit touching it, and a commit by an unregistered email fails. A blank git email is a
+against the introducing identity; an existing note's `author` never changes (stamp restores it; a
+change to it fails, recheck U2); in range mode every changed note, new ones included, is checked
+against the author of the last commit touching it (U4), and a commit by an unregistered email fails. A blank git email is a
 blocking `IDENTITY` failure; placeholder people with blank emails never match anyone. Derived skill
 copies are compared **byte for byte** (01-F7).
 
@@ -409,7 +441,7 @@ reports what it changes, so a trial can be judged before anyone keeps it.
 
 ```
 .memory/
-  cache/<hash32>-<depth>.md          rendered note blocks, each with an envelope: note hash, depth, sha256
+  cache/<hash32>-<depth>.md          rendered note blocks, each with an envelope: note hash, depth, HMAC
   bundles/<sha256-of-bytes>.md       the file an agent reads for one load; content-addressed, immutable
   session/current                    fallback session id
   session/<prefix>-<hash16>.json     ledger (version 2): ref, turn, {note: depth, hash, contract, turn, evicted}
@@ -419,17 +451,25 @@ reports what it changes, so a trial can be judged before anyone keeps it.
   pack/claims.jsonl, features.json   compiled by `mem compile`
   logs/recall-YYYY-MM.jsonl          ids shown + reasons, query salted-hashed
   prefs.json                         personal pins and mutes
-  salt                               per-machine random salt
+  placeholders.json                  playbook <PLACEHOLDER> values (never credential-like ones)
+  locks/<hash>.lock                  one writer at a time for a playbook or its run log
+  prompted-<key>.json, playbook-begin-<key>.json   per-session marks
+  salt                               per-machine random secret (0600), the key of the cache HMAC
 ```
 
 **Concurrency and integrity (audit area 04).** Every write goes to a unique temporary file, is
 fsynced and atomically renamed. A session's ledger is read-modified-written under a per-session
 lock, and it is written **last**, so a load that fails to save marks nothing as delivered. Bundles
 are named by the hash of their bytes, so no session or repeat load can overwrite another's. A cache
-block is served only if its envelope names the exact note version and depth and its digest
-matches; anything else is regenerated. A ledger of the wrong shape is quarantined (renamed
-`.corrupt-<time>`) with one warning and rebuilt. Cached copies and bundles untouched for 14 days are
-deleted at each `session start`; `mem session purge` deletes them all.
+block is served only if its envelope names the exact note version and depth and its HMAC, keyed
+by `salt`, matches; a block re-signed with a recomputed sha256 is not served (04-F4). Anything else
+is regenerated. A ledger of the wrong shape is quarantined (renamed `.corrupt-<time>`) with one
+warning and rebuilt; any other local file of the wrong shape or with a bad byte is ignored, never a
+traceback (N4, N5). `mem playbook log`, `caveat` and `approve` run under a per-file lock and write
+atomically: 32 concurrent `log` calls keep all 32 lines (N2). Locks are stale when their owner
+process is gone or after 60 s, and are stolen by rename, so two waiters cannot both take one.
+Cached copies, bundles, placeholder values and per-session marks untouched for 14 days are deleted
+at each `session start`; `mem session purge` deletes them all (N6).
 **[verified: 8 concurrent loads into one session and into eight sessions, all succeed, none lost]**
 
 **Session id** resolution: `--session`, then `MEMORY_SESSION`, then `CLAUDE_CODE_SESSION_ID`
@@ -456,14 +496,22 @@ pauses it on one machine.
 **Pull-request mode.** With `enforcement.mode: "pr"` in the policy at HEAD (or
 `MEMORY_SYNC_MODE=pr`), `post` on the default branch commits and rebases locally as usual
 (`MEMORY_SYNC_DIRECT_PUSH=0` tells the native script not to push), then the dispatcher pushes the
-unpushed memory commits to the person's own branch `memory/<who>` (from `user.email`) and keeps one
+unpushed memory commits to the person's own branch `memory/<who>` (their handle in `roles.json`, or
+for an unregistered address its local part plus a short hash, so alex@a and alex@b never share a
+branch) and keeps one
 pull request open for it with `gh`, or prints the compare link. In direct mode a push the server
 refuses because the branch is protected is exit 7 from the native script, and the dispatcher takes
 the same path. `main` is never force-pushed; `memory/<who>` is rewritten only with
-`--force-with-lease`, and only after checking that every file the remote branch changed is already
-in `HEAD` with the same content (so a squash-merged pull request is fine and a teammate's unique
-commit is refused, exit 1). Once the pull request merges, the next `pre` drops the local copies
-(git rebase skips changes already upstream). On a feature branch nothing changes: a project tier's
+`--force-with-lease`, and only after checking that every file the remote branch changed already
+has that content in `HEAD` or in the base branch (so the branch a squash-merged pull request left
+behind is reused, and a teammate's unique commit is refused, exit 1). Before every `pre` and `post`
+with unpushed commits, the dispatcher fetches and moves past local commits whose files already read
+the same upstream: a squash merge lands as one new commit, and replaying the second of two edits
+to one file onto it used to conflict with its own result (recheck P1). A pull's autostash no longer
+unstages what the person staged: the dispatcher saves the index and restores every entry upstream
+did not change (N1). The lock is stale only when its owner is a process on this machine that is
+gone, or when it is 30 minutes old and its owner is not known to be alive; stealing renames it
+first, so two waiters cannot both take it. On a feature branch nothing changes: a project tier's
 notes ride the code pull request. **[verified: tools/test_sync.py, a protected bare remote, both
 native scripts for exit 7 and commit-only, the dispatcher for fallback, reuse, squash-merge,
 refusal and the gh path with a fake CLI]**
@@ -501,35 +549,56 @@ d3, layout precomputed in Python, no layout in the browser).
   hypotheses and audience names, gap text, feature `covers` and local session ledgers withheld.
   Author, editor, agent and owner fields are withheld when `publication.publish_authors` is false
   (07-F4). A note whose title is itself sensitive sets `public_title:` or `publish_title: false`
-  (07-F6); titles otherwise publish, by design, because they are the map.
+  (07-F6): it is then published under an opaque id and path (`decisions/withheld-1`), relations to
+  it still resolve by its real title, and its real title, id and path join the leak sweep. Titles
+  otherwise publish, by design, because they are the map. Activity lists only the paths of notes the
+  map publishes, under their public names: never code paths, never a note's earlier path.
 - **Full build** (`--full`, local only): everything, plus the last 10 session ledgers.
 - **Verification** (07-F2/F3): `build_atlas.py --verify FILE` checks a **closed schema** (every key
-  and type allowed at every level; unknown fields, duplicate JSON keys, duplicate ids and references
-  to non-public notes all fail), then every publication rule. `--against-source` also rebuilds the
-  public graph from the notes and requires the file to match it exactly (apart from
-  `generated_at`). `tools/test_atlas.py` proves 25 tampering cases fail.
+  and type allowed at every level, list items and dict values included; unknown fields, duplicate
+  JSON keys, duplicate ids and references to non-public notes all fail), then every publication rule
+  against the POLICY's publication settings, never the file's own claim, then rebuilds the public
+  graph from the notes and requires the file to match it exactly (apart from `generated_at`).
+  `--shape-only` skips the rebuild and uses the strictest settings unless `--policy` names a
+  `roles.json`. `tools/test_atlas.py` proves every tampering case fails.
 - **Rendered page** (07-F5): `web/test` uses the full build of the same corpus as an oracle; every
-  withheld string becomes a marker and none may appear in the page's text or markup; a negative
-  test renders one on purpose and must be caught. Dependencies are pinned by `package-lock.json`.
+  withheld string becomes a marker and none may appear in the page's text or markup; a withheld
+  NAME is a marker whatever its length, matched as a whole word, and the redacted fixture omits
+  notes so that check has a denominator; negative tests render a long and a short marker on purpose
+  and both must be caught. Dependencies are pinned by `package-lock.json`.
 - **Publication is manual** during containment (`atlas.yml` is `workflow_dispatch` only), and runs
   the redaction tests and the page tests before generating.
 
 ### 4.6 Project scaffolding
 
-`scripts/new-project-memory.sh|.ps1 <repo> [name]` creates `memory/` (notes from
-`templates/project-memory/memory/`, `CORE.md`, empty `features/ trials/ evals/`, `.gitignore`),
-copies `sync-memory.*`, **`memory_guard.py`, `mem.py`** and `governance/roles.json` into
-`memory/`, installs the agent configs (Claude settings and slash commands pointed at
-`memory/scripts/mem.py`, Kiro hooks and steering, Cursor rule, MCP configs) and registers the Basic
-Memory project. On GitHub it adds `.github/workflows/memory-gate.yml` (scoped to `memory/**`; the
-base revision's `memory/scripts/memory_guard.py` judges the PR with the base policy and labels its
-level) and a marked block of `/memory/...` lines in `.github/CODEOWNERS`, which
-`memory_guard.py --notes-root memory codeowners --write` maintains without touching the product's
-own lines. It never overwrites; an existing file gets a `.team-memory.suggested` twin, and a file
-already holding exactly what it would write is left alone, so a second run changes nothing.
-Before 2026-09-23 the guard was not copied, so project tiers committed with the policy unenforced
-**[fixed]**; before 2026-09-27 a project tier had no gate on GitHub at all (08-F2) **[fixed;
-tools/test_scaffold.py]**.
+`scripts/new_project_memory.py <repo> [name] [--update] [--no-hook]` (the `.sh` and `.ps1` files
+are thin wrappers that find Python and run it: one implementation for every platform, after the
+two shell copies drifted apart and each had its own bugs, 08-F3..F10) creates `memory/` (notes from
+`templates/project-memory/memory/`), copies `sync-memory.*`, `memory_guard.py`, `mem.py` and
+`governance/roles.json`, and gives the code repository the **same** agent wiring as the company
+tier: `.claude/settings.json`, `.kiro/hooks/*`, `.claude/commands` and `.cursor/commands` are
+derived from the company tier's own files with every script path pointed at `memory/scripts/`, so
+the Stop significance hook and the Kiro prompt hook are there too. On GitHub it adds
+`.github/workflows/memory-gate.yml` and the memory block of `.github/CODEOWNERS`, which also owns
+the gate workflow and CODEOWNERS itself and must be the file's last lines.
+
+Behaviour, each with a test in `tools/test_scaffold.py`:
+- the new tier is stamped from the git identity and passes its own guard before anything is committed;
+- the printed commands commit everything the tier needs, `.github` included, with
+  `sync-memory.sh` executable;
+- a local `.git/hooks/pre-commit` runs the guard for commits that touch `memory/` (never replacing
+  an existing hook or a configured `core.hooksPath`);
+- a name with `/`, `&`, quotes, capitals or no usable letters is refused before anything is written,
+  and the title is inserted literally (no sed);
+- an existing file is never overwritten: it gets a `.team-memory.suggested` twin that the report
+  names; a folder in the way (a `.claude` FILE) is an error, exit 7, and nothing under it is
+  reported as created;
+- rerunning reports DRIFT when the company's engine or policy changed; `--update` refreshes the
+  engine (scripts and skill), never the notes or `roles.json`;
+- an invalid `memory/governance/roles.json` stops it (exit 6).
+
+In a project tier `context/`, `decisions/` and `CORE.md` are **L1** (`paths.project_rules`), as
+`levels.L1` has always said; they are L2 only in the company tier (11-F5).
 
 ### 4.7 Agent integration
 
@@ -537,17 +606,24 @@ tools/test_scaffold.py]**.
 |---|---|---|---|---|
 | Rules | `CLAUDE.md` | `.kiro/steering/memory.md` | `.cursor/rules/memory.mdc` | project instructions |
 | Procedure | skill `.claude/skills/team-memory` | skill `.kiro/skills/team-memory` | `.agents/skills` (native) | - |
-| Pull + ledger at start | `SessionStart` startup/resume/clear: `sync pre --agent`, `mem --hook session start` | `SessionStart`: same (IDE only) | by hand | by hand |
+| Pull + ledger at start | `SessionStart` startup/resume/clear: `sync pre --agent`, `mem --hook session start` | `SessionStart`: ONE action, `sync pre --agent --then-session`, so the order is fixed (IDE only) | by hand | by hand |
 | After compaction | `SessionStart` matcher `compact`: `mem --hook session evict` | none | none | none |
 | Context moved | `UserPromptSubmit`: `mem --hook moved --quiet --fetch --throttle 300` | `UserPromptSubmit` hook **[unverified trigger]** | by hand | - |
-| Commit at end | `Stop`: significance prompt, `sync post --agent` | `Stop`: same | by hand | by hand |
+| Commit at end | `Stop`: significance prompt, `sync post --agent` | `Stop`: ONE action, `sync post --agent --significance` | by hand | by hand |
 | Commands | `/cairn /cairn-context /cairn-recall /cairn-remember /cairn-gaps /cairn-try /cairn-feature` (`.claude/commands/`) | - | `.cursor/commands/` **[unverified format]** | - |
-| Permissions | allow `mem.py`, guard, sync, read-only Basic Memory tools; deny `delete_note`, `delete_project`, force-push, `--no-verify` | autoApprove read tools | - | - |
+| Permissions | allow named `mem.py` verbs (load, recall, why, remember, gap, try, keep, playbook find/run/log, ...), guard check/stamp/classify/significance, sync, read-only Basic Memory tools; deny `mem role`, `mem playbook approve`, `mem core init`, `codeowners --write`, `delete_note`, `delete_project`, force-push, `--no-verify` | autoApprove read tools | - | - |
 
 Claude Code behaviour above was checked against the current docs on 2026-09-23 (hook events and
 matchers including `compact`, plain stdout added to context for SessionStart and
 UserPromptSubmit, `.claude/commands/` still supported, `CLAUDE_CODE_SESSION_ID` from CLI 2.1.132)
 through a documentation lookup, not by running Claude Code.
+
+A project tier gets this same wiring, derived from these files (section 4.6). Slash commands pass
+their arguments as one string; `mem load`, `gap` and `remember` take flags written inside it
+(`/cairn-context fix the export --mode debug`) as flags (09-F5). `mem status` and `mem context`
+print who is acting and how high they may write (09-F7). An agent's `mem keep` of a trial above
+its level writes a proposal instead of the change (05-F2), and `mem remember --category decision`
+writes a proposal, never a journal observation (09-F4).
 
 ### 4.9 Playbooks (ADR-005)
 
@@ -592,8 +668,10 @@ line per run: `YYYY-MM-DD <handle> success|failed|partial <steps hash> <note>`, 
 Claude Code's `UserPromptSubmit` hook runs `mem --hook prompt`: on the first prompt of a session
 (not a slash command, and only if nothing was loaded yet) it runs the entry protocol for that
 prompt and prints the receipt, or the question, which Claude Code adds to the agent's context. So
-context arrives even when an agent skips its instructions. Later prompts, and any error, print
-nothing; `protocol.load_on_first_prompt: false` turns it off. Kiro and Cursor still rely on the
+context arrives even when an agent skips its instructions. The session is marked only once the
+receipt or the question was delivered, so a failed first load is retried on the next prompt (N3).
+Later prompts, and any error (a bad session id included), print nothing and exit 0;
+`protocol.load_on_first_prompt: false` turns it off. Kiro and Cursor still rely on the
 agent following its rules. **[verified: test_playbooks.py discovery checks]**
 
 ### 4.8 CI workflows (not yet exercised on GitHub)
@@ -605,7 +683,7 @@ only fail there; `scripts/init.py` sets the flag. `tests` always runs.
 
 | Workflow | Trigger | Does |
 |---|---|---|
-| `memory-gate.yml` | pull request | checks out the **trusted base revision** and the PR separately; the base's guard judges the PR's data with the base's policy (safety, format, per-commit attribution; `--no-access` because review enforces the level); runs the base's `test_security.py` **against the PR's guard**, so a PR that weakens the guard goes red; checks CODEOWNERS is generated and names real people; `classify` decides the review level. A second job, which runs no PR code, labels the PR (fails if labelling fails) and, when the level is in the BASE policy's `enforcement.auto_merge_levels`, enables GitHub auto-merge (squash). Empty by default, so nothing auto-merges until an owner opts in. |
+| `memory-gate.yml` | pull request | checks out the **trusted base revision** and the PR separately; the base's guard judges the PR's data with the base's policy (safety, format, per-commit attribution; `--no-access` because review enforces the level); runs the base's `test_security.py` **against the PR's guard**, so a PR that weakens the guard goes red; checks CODEOWNERS is generated and names real people; `classify --require-owned` decides the review level and fails when a path above the auto-merge levels would need no CODEOWNERS review (a spelling CODEOWNERS cannot express, such as `AgEnTs.md`). A second job, which runs no PR code, labels the PR (fails if labelling fails) and, when the level is in the BASE policy's `enforcement.auto_merge_levels`, enables GitHub auto-merge (squash). Empty by default, so nothing auto-merges until an owner opts in. |
 | `tests.yml` | every PR and push to main | `tools/run_tests.sh` plus the UI suite (`npm ci`) |
 | `atlas.yml` | **manual only** (containment) | redaction tests, page tests, build, `--verify --against-source`, commit as the bot |
 | `cascade.yml` | push to main | stamps `review_needed` on dependents of a landed planning change and opens one issue (moved out of memory-gate, where it could never run: 10-F6) |
@@ -621,10 +699,11 @@ the audit's 10-F1 attack PR and quieter variants **[verified locally; never run 
 CODEOWNERS (or run `memory_guard.py codeowners --write` after changing owners), pushes, and protects `main` (require PRs, Code Owner review and
 the `memory-gate` check; dismiss stale approvals) and sets `enforcement.mode` to `pr`, which the
 sync reads (formerly 11-F6: the field was documented and unread). With `auto_merge_levels`
-non-empty, `codeowners` stops writing the owner catch-all: each path rule above those levels names
-the people whose role reaches it, auto-merge levels name nobody, the protected floor names the
-owners, and the lines are written in reverse because GitHub applies the last matching line while
-roles.json applies the first **[verified: test_security, including a policy that demotes
+non-empty, `codeowners` still writes the owner catch-all FIRST (so a path no rule names is never
+unowned), then each path rule in reverse (above those levels naming the people whose role reaches
+it, auto-merge levels naming nobody), then the protected floor and the structural floor's patterns
+(dot-files, instruction files, scripts at any depth) naming the owners, because GitHub applies the
+last matching line while roles.json applies the first **[verified: test_security, including a policy that demotes
 `scripts/` still leaving it owned]**.
 
 ---
@@ -753,16 +832,20 @@ guard-rail that an agent following its instructions will respect and a hostile p
 | An agent rewrites canon | L0 cap; proposals; review of every PR above the auto-merge levels; `MEMORY_ACTOR_KIND=human` ignored inside an agent runtime with no terminal | CI + review, once protected | locally, a process that drops the runtime's markers, or skips the hook, still writes; only review catches it |
 | A PR neutralises the gate (replaces guard, tests, policy) | base-revision checkout judges; base security tests run against the PR's guard; `classify` from the base policy; policy changes are L3 | CI | GitHub behaviour of the two-checkout job never run |
 | A policy change authorises itself | trusted-base policy; both policies must allow; protected floor; catch-all and empty policies refused | local + CI | - |
-| Path tricks (case, Unicode, renames) | normalisation and rename-source classification | local + CI | symlinks on Windows untested (needs Developer Mode) |
+| Path tricks (case, Unicode, renames, quoting) | git listings are NUL-separated and never quoted (a non-ASCII name like `scripts/évil.py` was quoted by git, matched no rule and passed as L0); normalisation (NFKC, case-fold, dot segments); rename sources classified; a symbolic link or submodule pointer is L3 anywhere | local + CI | symlinks on Windows untested (needs Developer Mode) |
+| Executable or instruction files where notes go | a structural floor: any dot-file or dot-folder, any non-Markdown file at the tier root, agent instruction files at any depth (`AGENTS.md`, `GEMINI.md`, a nested `CLAUDE.md`), script, build and config files at any depth, template hooks, and names a filesystem could alias (`:` streams, trailing dots, `SCRIPT~1`, invisible characters) are L3; CODEOWNERS owns them, and `classify --require-owned` stops a spelling CODEOWNERS cannot express | local + CI | - |
+| What the guard reads differs from what is committed | `check --staged` reads the index, `--range` the head of the range; a staged secret hidden by a clean or deleted working file is caught | local + CI | - |
+| mem's local state committed | `.memory/` is refused for everyone (`LOCAL-STATE`) | local + CI | - |
 | Note content hijacks an agent | "notes are data" rule; `INJECTION` patterns (overrides, pipe-to-shell, guard variables, `--no-verify`, bypassing a control, text addressed to agents, concealment from the user) | commit | patterns are a list: 0 false positives over 97 real notes, but new phrasings will pass; the instruction is the main control |
-| A code PR rewrites a project tier | the project repo's `memory-gate` (base guard, base policy) and its CODEOWNERS memory block | CI + review, once protected | only if the scaffold's workflow and CODEOWNERS block were committed |
+| A code PR rewrites a project tier | the project repo's `memory-gate` (base guard, base policy) and its CODEOWNERS memory block, which also owns `memory-gate.yml` and CODEOWNERS itself and must be the file's last lines; the printed commit includes `.github` | CI + review, once protected | the pull request that ADDS `memory/` has no trusted guard to judge it: it is labelled L3 and an owner reviews it by hand |
 | Hooks as a remote-code path | hook, script and config roots at L3 under the floor | CI + review | - |
 | Secrets committed | guard `SECRET-*`; sync secret scan on the exact committed tree | local + CI | regex-based; novel formats pass; gitleaks removed from CI |
 | Out-of-tier files ride along a sync | temporary index; tier-only push | local | the Windows CI job has not yet run on GitHub |
 | Restricted leakage | private submodule (a GitHub permission); `restricted_read` filter; atlas omits every trace | GitHub access is real; the filter is advisory on a laptop that has the files | anyone with submodule access reads the files |
-| Public atlas leakage | closed schema; source comparison; restricted-token sweep; page oracle; manual publication | CI | titles publish by design unless `public_title`/`publish_title: false` |
-| Misattribution | stamp from git; new-note author check; per-commit check in CI; blank email blocks | local + CI | a person can commit under a teammate's email locally; GitHub shows the pusher, review catches it |
-| Local tampering with cache or ledger | cache envelopes; ledger validation and quarantine | local | anyone who can write the checkout can write the notes too |
+| Public atlas leakage | closed schema with typed list items and values; `--verify` compares with a fresh build by default and never trusts the file's own `publication` block; restricted-name sweep (whole words, case-insensitive); a withheld title gets an opaque id and path; activity lists only published note paths (never code paths, never a note's old path); page oracle including short names; manual publication | CI | titles publish by design unless `public_title`/`publish_title: false` |
+| Misattribution | stamp from git; a new note's author must be its introducer; an existing note's `author` never changes; every later committer in a range must be recorded in `updated_by`; blank email blocks | local + CI | a person can commit under a teammate's email locally; GitHub shows the pusher, review catches it |
+| Local tampering with cache or ledger | cache blocks carry an HMAC keyed by this machine's salt; ledger validation and quarantine; damaged local files are ignored, never a crash | local | a process that can read `.memory/salt` can forge a block, and can edit the notes anyway |
+| Credentials in playbook placeholders | a value that looks like a credential fills the output and is never written down; saved values are purged with the session | local | - |
 
 ---
 
@@ -772,21 +855,17 @@ guard-rail that an agent following its instructions will respect and a hostile p
 
 - Mode detection is lexical. A bug report that names neither an intent nor a listed symptom
   ("drops captions") gets no confident mode, so `mem load` asks the person instead of loading
-  (exit 2, `ask_the_person`, below); with `protocol.ask_on_guess: false` it loads build and the
-  receipt says `A GUESS`. Measured on a real 13-feature project tier with asks written before running (2026-09-27): the
-  tuned 15 at 14/15; a first held-out 10 at 6/10 before the change (2 silent wrong modes, 2 not
-  confident); a second held-out 8, written after the change, at 7/8 with the feature right 8 of 8
-  (the miss is the flagged guess above). A verb that is also a feature name ("the **export** is
-  wrong" when Export is a feature) pulls that feature.
-- Resolution picks one target when the runner-up scores below 85% of the top, even when the ask
-  genuinely spans two features.
-- Carry-forward keeps ids for about 4 in 5 of the builder's rewordings, but the audit measured 8 of
-  20 on its own set, and found the one-for-one rule gives an unrelated replacement the deleted
-  claim's id and that reordering can swap ids (02-F1..F3). Not fixed (Phase 3).
-- Retrieval: a held-out set of 20 asks written by the auditor scored 6/20; at 200 features the feature
-  map alone costs ~7,700 tokens (03-F8/F9). Not fixed (Phase 3).
-- Trials: the eval comparison can fail open when the overlay changes the eval set, and an agent's
-  `keep` of an L1 change is denied instead of becoming a proposal (05-F1/F2). Not fixed (Phase 3).
+  (exit 2, `ask_the_person`); with `protocol.ask_on_guess: false` it loads build and the receipt
+  says `A GUESS`. "debug", "investigate", "troubleshoot" and "diagnose" are debug words. A verb that
+  is also a feature name ("the **export** is wrong" when Export is a feature) pulls that feature.
+- When two features score within 15% of each other, `mem load` asks which one (plan mode too); an
+  orient ask shows both cards. With `ask_on_guess: false` it loads both.
+- Claim ids are carried by lexical similarity. A true paraphrase that shares few words ("Idle
+  sessions expire after 15 minutes" -> "A token with no activity for 15 minutes is revoked") gets a
+  new id: the recheck's 20 paraphrases keep 9 ids and move none to another fact. A lost id is
+  reported by the guard (`claim id(s) gone from this note`) so a person can put it back; a wrongly
+  transferred id would be silent, which is why ambiguous matches get a new id.
+- Past 40 features the feature map in a bundle lists the ones near the ask and names the rest.
 - A project tier's notes ride the code pull request, so the code review approves them; its
   `memory-gate` labels the level but does not auto-merge.
 - Kiro and Cursor share one session ledger per checkout; two concurrent sessions there collide.
@@ -804,7 +883,8 @@ guard-rail that an agent following its instructions will respect and a hostile p
 | any-link neighbourhood at 3 hops, 3,020-note synthetic corpus | p95 333, max 826 notes | one-off measurement over `tools/gen_fixture.py` output (script not shipped) |
 | directed 2 hops on the same corpus | upstream p95 8, downstream p95 12 | same |
 | composition of cairn's own notes at the time | 72.7% prose, 18.6% claims (chars) | one-off measurement (script not shipped) |
-| claim-id carry-forward | 4/5 rewordings keep their id | test_guard fixture |
+| claim-id carry-forward | 4/5 realistic edits keep their id; 9/20 deep paraphrases, 0 moved to another fact | test_guard fixture; test_claims (the recheck's 20 pairs, a ratchet) |
+| feature map at 208 features | under 3,000 tokens for a build load | test_protocol |
 
 ---
 
@@ -819,8 +899,10 @@ guard-rail that an agent following its instructions will respect and a hostile p
 - GitHub Action versions (`actions/checkout@v7`, `setup-python@v6`, `setup-node@v5`), the
   two-checkout memory-gate job, label creation permissions, and fork-PR token behaviour. (The gate no
   longer relies on `pull_request.user.email`.)
-- `new-project-memory.ps1` and a generated project tier's hooks on Windows (`sync-memory.ps1` itself
-  was verified on Windows on 2026-09-25).
+- `new-project-memory.ps1` (now a wrapper around `new_project_memory.py`) and a generated project
+  tier's hooks on Windows, the owner check of the PowerShell lock, and Windows PowerShell's handling
+  of non-ASCII git output after `[Console]::OutputEncoding` is set to UTF-8. `sync-memory.ps1` itself
+  was verified on Windows on 2026-09-25; the windows-sync CI job runs the new cases.
 - Windows code pages in general: UTF-8 is now explicit for git output (04-F3), verified only by
   simulating a non-UTF-8 locale on Linux.
 - The synthetic corpora approximate a larger team's structure; real graphs will differ.
@@ -852,7 +934,12 @@ Things worth trying to break, each with the expected result:
 6. Load with `--ref` of a date before a change, then latest in the same session: the ledger
    resets and says so.
 7. Load as a person without `restricted_read`: restricted notes are counted as withheld, not shown.
-8. Tamper with a public `graph.json` (any field in section 4.5): `build_atlas --verify` exits 1.
+8. Tamper with a public `graph.json` (any field in section 4.5): `build_atlas --verify` exits 1. It
+   compares with a fresh build of the notes by default; `--shape-only` checks the file alone and
+   cannot see a note relabelled `open` or an edited title, so it is never enough to publish.
+16. As an agent, stage `scripts/évil.py`, `AGENTS.md`, `.vscode/tasks.json` or `log/journal/.envrc`:
+    exit 4 each.
+17. Stage a secret, then edit or delete the file on disk, and run `check --staged`: exit 3.
 9. Open a trial for another person, load as yourself: your bundle is unaffected.
 10. Check that `mem.py` has no network access other than `git fetch` in `moved --fetch`, and no
     write outside the notes root and `.memory/`.
@@ -872,15 +959,15 @@ Things worth trying to break, each with the expected result:
 
 | Path | Lines | Role |
 |---|---|---|
-| `scripts/memory_guard.py` | 1,897 | enforcer |
-| `scripts/mem.py` | 2,227 | protocol engine and verbs |
-| `scripts/build_atlas.py` | 1,388 | atlas data and redaction gate |
-| `scripts/sync-memory.py/.sh/.ps1` | 159 / 307 / 350 | sync dispatcher and implementations |
-| `scripts/new-project-memory.sh/.ps1` | 101 / 112 | project scaffold |
+| `scripts/memory_guard.py` | 2,787 | enforcer |
+| `scripts/mem.py` | 3,379 | protocol engine and verbs |
+| `scripts/build_atlas.py` | 1,565 | atlas data and redaction gate |
+| `scripts/sync-memory.py/.sh/.ps1` | 536 / 334 / 380 | sync dispatcher and implementations |
+| `scripts/new_project_memory.py` (+ `.sh`/`.ps1` wrappers) | 436 / 18 / 27 | project scaffold, one implementation for every platform |
 | `playbooks/`, `decisions/ADR-005-playbooks.md` | - | the playbook folder note and the decision record |
 | `scripts/init.py` | 219 | turns the template into an instance: owner row, placeholders, git identity, CODEOWNERS, stamps, removes template-only files |
 | `LICENSE`, `LICENSE-NOTES`, `NOTICE`, `.github/README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `ISSUE_TEMPLATE/`, `pull_request_template.md`, `assets/` | - | the licences (Apache-2.0 for code, MIT-0 for notes, templates and agent configuration; `NOTICE` has the split) and the open-source project's front page, contribution files and social preview; `init.py` removes the `.github/` ones in an instance |
-| `governance/roles.json` | 478 | all policy |
+| `governance/roles.json` | 518 | all policy |
 | `governance/ACCESS.md`, `SIGNIFICANCE.md` | 171 / 125 | policy in prose |
 | `CLAUDE.md`, `.cursor/rules/memory.mdc`, `.kiro/steering/memory.md` | 203 / 83 / 80 | agent rules |
 | `.agents/skills/team-memory/SKILL.md` (+2 copies) | 180 | agent procedure |
@@ -890,7 +977,7 @@ Things worth trying to break, each with the expected result:
 | `CORE.md`, `features/*.md` | 36 / 6 files | big picture and this system's feature spine |
 | `decisions/ADR-001..004` | 28-127 | decision records |
 | `templates/project-memory/**` | 26 files | project tier seed |
-| `tools/test_*.py`, `tools/testpolicy.py`, `tools/run_tests.sh`, `tools/gen_fixture.py` | 2,312 total | tests; `testpolicy.py` supplies the fictional owner (`alex`) the suites run as |
+| `tools/test_*.py` (13 suites), `tools/testpolicy.py`, `tools/run_tests.sh`, `tools/gen_fixture.py` | 4,443 total | tests; `testpolicy.py` supplies the fictional owner (`alex`) the suites run as |
 | `web/` | app 1,767, style 654, index 211 | the atlas page; `web/test/` UI suite |
 
 

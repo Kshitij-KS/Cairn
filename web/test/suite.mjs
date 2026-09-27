@@ -1,6 +1,6 @@
 /* The invariant this whole design exists to keep, asserted at every corpus size:
  * never more than `cap` labelled things on screen, at any depth, in either arrangement. */
-import { boot, withheldMarkers, privacyLeaks } from "./harness.mjs";
+import { boot, withheldMarkers, privacyLeaks, omittedCount } from "./harness.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -179,8 +179,15 @@ async function run(tag, file) {
   // --- privacy (oracle: the full build of the same corpus, if there is one) ------------
   const fullPath = file.replace(/\.json$/, ".full.json");
   if (fs.existsSync(fullPath)) {
-    const markers = withheldMarkers(data, JSON.parse(fs.readFileSync(fullPath, "utf8")));
+    const fullData = JSON.parse(fs.readFileSync(fullPath, "utf8"));
+    const markers = withheldMarkers(data, fullData);
     ok("the privacy oracle has something to look for", markers.length > 0, `${markers.length} withheld markers`);
+    if (tag === "redacted corpus") {
+      // a check whose denominator is zero checked nothing (recheck 07-F5)
+      ok("the redacted corpus leaves notes out, so the restricted-name check has something to test",
+         omittedCount(data, fullData) >= 2, `${omittedCount(data, fullData)} omitted`);
+      ok("short secret names are markers too", markers.some((m) => m.length < 24), markers.filter((m) => m.length < 24).join(", "));
+    }
     const leaks = privacyLeaks(doc, markers);
     ok("no withheld string reaches the rendered page (text or markup)", leaks.length === 0, leaks.slice(0, 3).join(" | "));
   } else if (tag === "template corpus") {
@@ -195,12 +202,13 @@ async function run(tag, file) {
 
 const fixtures = [
   ["template corpus", FIX("graph.json")],
+  ["redacted corpus", FIX("redacted.json")],
   ["120 notes", FIX("n120.json")],
   ["1020 notes", FIX("n1020.json")],
   ["3020 notes", FIX("n3020.json")],
 ];
 for (const [tag, f] of fixtures) {
-  if (!fs.existsSync(f)) { console.log("\n=== " + tag + " === (missing)"); continue; }
+  if (!fs.existsSync(f)) { console.log("\n=== " + tag + " === (missing)"); fail++; continue; }  // a missing fixture is red
   await run(tag, f);
 }
 console.log(`\n${pass} passed, ${fail} failed`);

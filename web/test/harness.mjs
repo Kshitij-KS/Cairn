@@ -125,13 +125,21 @@ export function withheldMarkers(publicGraph, fullGraph) {
   const pubText = JSON.stringify(publicGraph);
   const pubById = new Map(publicGraph.nodes.map((n) => [n.id, n]));
   const out = new Set();
+  const clean = (s) => String(s || "").replace(/[`*_#>\[\]]/g, "").replace(/\s+/g, " ").trim();
+  // Long strings (body lines, briefs) are matched as substrings. A NAME is matched as a whole
+  // word whatever its length: the old 24-character floor meant "Acme Deal" was never a marker,
+  // so a leaked restricted title could not be caught (recheck 07-F5).
   const add = (s) => {
-    const t = String(s || "").replace(/[`*_#>\[\]]/g, "").replace(/\s+/g, " ").trim();
+    const t = clean(s);
     if (t.length >= 24 && !pubText.includes(t.slice(0, 40))) out.add(t.slice(0, 40));
+  };
+  const addName = (s) => {
+    const t = clean(s);
+    if (t.length >= 3 && !wordIn(pubText, t)) out.add(t);
   };
   for (const n of fullGraph.nodes) {
     const p = pubById.get(n.id);
-    if (!p) { add(n.title + " "); add(n.id + " ".repeat(24)); continue; }   // omitted note: its name is secret
+    if (!p) { addName(n.title); addName(n.id); continue; }   // omitted note, or a withheld title: its name is secret
     if (p.body == null && n.body) for (const line of n.body.split("\n").slice(0, 60)) add(line);
     if (p.brief == null && n.brief) add(n.brief);
   }
@@ -139,8 +147,20 @@ export function withheldMarkers(publicGraph, fullGraph) {
   return [...out];
 }
 
+/** How many notes of the full build the public file leaves out (or renames): the denominator the
+ * restricted-name check must not run with at zero. */
+export function omittedCount(publicGraph, fullGraph) {
+  const ids = new Set(publicGraph.nodes.map((n) => n.id));
+  return fullGraph.nodes.filter((n) => !ids.has(n.id)).length;
+}
+
+function wordIn(text, t) {
+  const esc = t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp("(^|[^\\p{L}\\p{N}_])" + esc + "($|[^\\p{L}\\p{N}_])", "iu").test(text);
+}
+
 export function privacyLeaks(doc, markers) {
   const text = doc.body.textContent || "";
   const html = doc.documentElement.outerHTML || "";
-  return markers.filter((m) => text.includes(m) || html.includes(m));
+  return markers.filter((m) => (m.length >= 24 ? (text.includes(m) || html.includes(m)) : (wordIn(text, m) || wordIn(html, m))));
 }

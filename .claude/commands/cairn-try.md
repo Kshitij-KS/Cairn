@@ -1,7 +1,7 @@
 ---
 description: 'Open, list, keep or drop a context trial (an experiment on the memory)'
 argument-hint: '<hypothesis> --change <change> [--for handle] [--days N] | list | keep <slug> | drop <slug> --result <what we learned>'
-allowed-tools: 'Bash(uv run -q --script scripts/mem.py:*)'
+allowed-tools: 'Bash(uv run -q --script scripts/mem.py trials:*), Bash(uv run -q --script scripts/mem.py eval:*), Bash(uv run -q --script scripts/mem.py keep:*), Bash(uv run -q --script scripts/mem.py drop:*), Bash(uv run -q --script scripts/mem.py try:*)'
 ---
 
 Work with context trials. Arguments: $ARGUMENTS

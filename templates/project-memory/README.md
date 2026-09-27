@@ -23,6 +23,11 @@ scripts/new-project-memory.sh /path/to/repo my-project-name
 scripts\new-project-memory.ps1 C:\path\to\my-app
 ```
 
+Both wrappers run `scripts/new_project_memory.py` (one implementation for every platform). Options:
+`--update` refreshes the copied scripts and skill from cairn (never notes or `roles.json`);
+`--no-hook` skips the local pre-commit hook. A project name must be lower-case letters, digits and
+hyphens; a folder name that does not give one needs the name passed explicitly.
+
 ## What it does (idempotent, never overwrites)
 
 | Step | Result in the target repo |

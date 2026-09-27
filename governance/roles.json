@@ -52,7 +52,8 @@
         "features/**",
         "<project-repo>/memory/features/**",
         "<project-repo>/memory/context/**",
-        "<project-repo>/memory/decisions/**"
+        "<project-repo>/memory/decisions/**",
+        "<project-repo>/memory/CORE.md"
       ],
       "review": "one maintainer of that project",
       "cascade": "that project's notes",
@@ -377,6 +378,29 @@
         "glob": "context/**",
         "level": "L2",
         "reason": "company canon"
+      }
+    ],
+    "$comment_project_rules": "Tried BEFORE rules, in a project tier only (memory/ inside a code repository): there the notes plan one project, so its context/, decisions/ and CORE.md are L1, as levels.L1 says. In the company tier they stay L2.",
+    "project_rules": [
+      {
+        "glob": "context/restricted/**",
+        "level": "L2",
+        "reason": "see sensitivity.restricted"
+      },
+      {
+        "glob": "context/**",
+        "level": "L1",
+        "reason": "this project's context: planned by its maintainers"
+      },
+      {
+        "glob": "decisions/**",
+        "level": "L1",
+        "reason": "this project's decisions: L1, owned by its maintainers"
+      },
+      {
+        "glob": "CORE.md",
+        "level": "L1",
+        "reason": "this project's big picture"
       }
     ],
     "default": "L0"

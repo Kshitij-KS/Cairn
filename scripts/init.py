@@ -66,7 +66,7 @@ def ask(label, current, interactive):
 
 
 def git(*args, check=True):
-    p = subprocess.run(["git", "-C", ROOT, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    p = subprocess.run(["git", "-c", "core.quotePath=false", "-C", ROOT, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                        text=True, encoding="utf-8")
     if check and p.returncode != 0:
         fail("git %s failed: %s" % (" ".join(args), p.stderr.strip()), 6)

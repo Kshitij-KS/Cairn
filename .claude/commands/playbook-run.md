@@ -1,7 +1,7 @@
 ---
 description: 'Walk the person through a playbook, step by step, asking before anything that changes their machine'
 argument-hint: '<ID or title words>'
-allowed-tools: 'Bash(uv run -q --script scripts/mem.py:*)'
+allowed-tools: 'Bash(uv run -q --script scripts/mem.py playbook run:*), Bash(uv run -q --script scripts/mem.py playbook caveat:*), Bash(uv run -q --script scripts/mem.py playbook log:*)'
 ---
 
 Walk the person through the playbook: $ARGUMENTS

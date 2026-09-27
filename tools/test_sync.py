@@ -18,6 +18,8 @@ and the pull-request mode of sync-memory.py.
 import json
 import os
 import shutil
+import socket
+import time
 import subprocess
 import sys
 import tempfile
@@ -100,6 +102,8 @@ def install_tier(root, prefix=""):
         json.dump({"name": "sync-test", "kind": "project" if prefix else "team"}, fh)
     os.makedirs(os.path.join(nr, "context"), exist_ok=True)
     os.makedirs(os.path.join(nr, "log", "journal"), exist_ok=True)
+    with open(os.path.join(nr, ".gitignore"), "w", newline="\n") as fh:
+        fh.write(".memory/\n__pycache__/\n")  # as every real tier has (the guard refuses .memory/)
     return nr
 
 
@@ -157,6 +161,7 @@ def remote_count(bare, rng):
 
 
 def new_note(nr, name):
+    os.makedirs(os.path.join(nr, "log", "journal"), exist_ok=True)
     with open(os.path.join(nr, "log", "journal", name + ".md"), "w", newline="\n") as fh:
         fh.write(NOTE.format(t=name.replace("-", " ").title()))
 
@@ -303,7 +308,16 @@ def dispatcher_tests(tmp):
     p = subprocess.run([sys.executable, disp, "bogus"], cwd=nr, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                        text=True, env=clean_env())
     ok("an unknown mode is a usage error (64)", p.returncode == 64, p.returncode)
+    head = git(a, "rev-parse", "HEAD")
+    with open(os.path.join(nr, "scripts", "\u00e9vil.py"), "w") as fh:
+        fh.write("print(1)\n")
+    p = subprocess.run([sys.executable, disp, "post", "--agent"], cwd=nr, stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE, text=True, env=clean_env({"MEMORY_SYNC_NO_GH": "1"}))
+    ok("recheck U1: an agent's post of scripts/\u00e9vil.py is refused (4) and nothing is committed",
+       p.returncode == 4 and git(a, "rev-parse", "HEAD") == head, (p.returncode, (p.stdout + p.stderr)[-200:]))
+    os.remove(os.path.join(nr, "scripts", "\u00e9vil.py"))
     pr_mode_tests(tmp)
+    squash_and_index_tests(tmp)
 
 
 FAKE_GH = """import os, sys
@@ -392,6 +406,149 @@ def pr_mode_tests(tmp):
        and "pull/7" in outs[-1][1] and remote_count(bare2, "main..memory/alex") == 2, (outs, calls))
 
 
+def squash_and_index_tests(tmp):
+    """Recheck P1, P2, N1, the lock owner and branch names: each is the recheck's reproduction."""
+    print("\n=== squash merges, left-behind branches, the index, the lock ===")
+    d = os.path.join(tmp, "squash")
+    os.makedirs(d)
+    bare, a, nr = make_remote(d, "r")
+    protect(bare)
+    disp = os.path.join(nr, "scripts", "sync-memory.py")
+    note = os.path.join(nr, "context", "note.md")
+
+    def run_disp(*argv, extra=None):
+        p = subprocess.run([sys.executable, disp, *argv], cwd=nr, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           text=True, env=clean_env(dict({"MEMORY_SYNC_NO_GH": "1"}, **(extra or {}))))
+        return p.returncode, p.stdout + p.stderr
+
+    def squash_merge():
+        m = os.path.join(d, "merger")
+        if not os.path.isdir(m):
+            git(d, "clone", "-q", bare, m)
+        git(m, "fetch", "-q", "origin")
+        git(m, "reset", "-q", "--hard", "origin/main")
+        git(m, "merge", "-q", "--squash", "origin/memory/alex")
+        git(m, "commit", "-qm", "memory: notes from alex (squashed)")
+        git(m, "push", "-q", "origin", "main", env=clean_env({"ALLOW_MAIN": "1"}))
+
+    append(note, "\nFirst edit.\n")
+    run_disp("post")
+    append(note, "\nSecond edit.\n")
+    rc, out = run_disp("post")
+    two = remote_count(bare, "main..memory/alex") == 2
+    squash_merge()
+    rc, out = run_disp("pre")
+    ok("P1: after a squash merge of two edits to ONE file, pre does not conflict and nothing stays unpushed",
+       two and rc == 0 and git(a, "rev-list", "--count", "@{u}..HEAD") == "0"
+       and "Second edit." in open(note).read(), (rc, out[-300:]))
+    append(note, "\nThird edit.\n")
+    before = subprocess.run(["git", "--git-dir", bare, "rev-parse", "memory/alex"], stdout=subprocess.PIPE, text=True).stdout.strip()
+    rc, out = run_disp("post")
+    after = subprocess.run(["git", "--git-dir", bare, "rev-parse", "memory/alex"], stdout=subprocess.PIPE, text=True).stdout.strip()
+    ok("P2: the branch the squashed pull request left behind is reused, not a wall",
+       rc == 0 and after != before and after == git(a, "rev-parse", "HEAD") and "not overwriting" not in out, (rc, out[-300:]))
+    append(note, "\nFourth edit, local only.\n")
+    run_disp("post", extra={"MEMORY_SYNC_NO_PUSH": "1"})
+    squash_merge()   # merges the third edit only
+    rc, out = run_disp("pre")
+    ok("P1: with one more local commit on top, pre replays only that one",
+       rc == 0 and git(a, "rev-list", "--count", "@{u}..HEAD") == "1" and "Fourth edit" in open(note).read()
+       and "Third edit." in open(note).read(), (rc, out[-300:], git(a, "log", "--oneline", "-5")))
+
+    # the person's branch name: two addresses with the same local part never share a branch
+    probe = ("import importlib.util, sys\n"
+             "spec = importlib.util.spec_from_file_location('sm', %r)\n"
+             "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\n"
+             "print(m.who())\n" % disp)
+    names = []
+    for email in ("alex@example.test", "alex@one.test", "alex@two.test"):
+        git(a, "config", "user.email", email)
+        names.append(subprocess.run([sys.executable, "-c", probe], cwd=nr, stdout=subprocess.PIPE, text=True,
+                                    env=clean_env()).stdout.strip())
+    git(a, "config", "user.email", EMAIL)
+    ok("who(): a registered person is their handle; two unregistered alex@ addresses get different branches",
+       names[0] == "alex" and names[1].startswith("alex-") and names[2].startswith("alex-") and names[1] != names[2], names)
+
+    # N1: the pull's autostash must not unstage what the person staged outside the tier
+    d2 = os.path.join(tmp, "index")
+    os.makedirs(d2)
+    bare2, a2, nr2 = make_remote(d2, "r", prefix="memory")
+    b2, _bn = clone(d2, bare2, "b", prefix="memory")
+    os.makedirs(os.path.join(a2, "app"), exist_ok=True)
+    with open(os.path.join(a2, "app", "code.py"), "w") as fh:
+        fh.write("print('committed')\n")
+    git(a2, "add", "app/code.py")
+    git(a2, "commit", "-qm", "app code")
+    git(a2, "push", "-q")
+    git(b2, "pull", "-q")
+    with open(os.path.join(a2, "app", "code.py"), "a") as fh:
+        fh.write("print('a staged edit')\n")
+    git(a2, "add", "app/code.py")
+    new_note(os.path.join(b2, "memory"), "2026-10-20-teammate")
+    git(b2, "add", "-A")
+    git(b2, "commit", "-qm", "teammate note")
+    git(b2, "push", "-q")
+    new_note(nr2, "2026-10-21-mine")
+    disp2 = os.path.join(nr2, "scripts", "sync-memory.py")
+    p = subprocess.run([sys.executable, disp2, "post", "--agent"], cwd=nr2, stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE, text=True, env=clean_env())
+    staged = git(a2, "diff", "--cached", "--name-only")
+    ok("N1: post with a teammate's push to pull keeps app/code.py staged", p.returncode == 0 and staged == "app/code.py",
+       (p.returncode, staged, (p.stdout + p.stderr)[-200:]))
+    new_note(os.path.join(b2, "memory"), "2026-10-22-teammate")
+    git(b2, "add", "-A")
+    git(b2, "commit", "-qm", "teammate note 2")
+    git(b2, "push", "-q")
+    p = subprocess.run([sys.executable, disp2, "pre"], cwd=nr2, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                       text=True, env=clean_env())
+    ok("N1: ...and so does pre", p.returncode == 0 and git(a2, "diff", "--cached", "--name-only") == "app/code.py"
+       and "a staged edit" in git(a2, "diff", "--cached"),
+       (p.returncode, git(a2, "diff", "--cached", "--name-only")))
+
+    # the lock: judged by its owner, not by its age alone
+    lock = os.path.join(git(a, "rev-parse", "--absolute-git-dir"), "sync-memory.lock")
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    os.mkdir(lock)
+    with open(os.path.join(lock, "owner"), "w") as fh:
+        fh.write("pid=%d host=%s started=x\n" % (dead.pid, socket.gethostname()))
+    old = time.time() - 60
+    os.utime(lock, (old, old))
+    rc, out = run_disp("pre")
+    ok("06-F7: a lock whose owner process is gone is taken over at once", rc == 0 and not os.path.isdir(lock), (rc, out[-200:]))
+    os.mkdir(lock)
+    with open(os.path.join(lock, "owner"), "w") as fh:
+        fh.write("pid=%d host=%s started=x\n" % (os.getpid(), socket.gethostname()))
+    old = time.time() - 7200
+    os.utime(lock, (old, old))
+    rc, out = run_disp("pre")
+    ok("06-F7: a two-hour-old lock whose owner is still running is NOT stolen (exit 75)", rc == 75 and os.path.isdir(lock), rc)
+    shutil.rmtree(lock, ignore_errors=True)
+    ps = shutil.which("powershell") or shutil.which("pwsh")
+    if os.name == "nt" and ps:
+        native = [ps, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
+                  os.path.join(nr, "scripts", "sync-memory.ps1"), "pre"]
+        host = os.environ.get("COMPUTERNAME", socket.gethostname())   # what [Environment]::MachineName reports
+    elif os.name != "nt" and shutil.which("bash"):
+        native = [shutil.which("bash"), os.path.join(nr, "scripts", "sync-memory.sh"), "pre"]
+        host = subprocess.run(["hostname"], stdout=subprocess.PIPE, text=True).stdout.strip() or socket.gethostname()
+    else:
+        native = None
+    if native:
+        res = []
+        for pid, age in ((dead.pid, 60), (os.getpid(), 7200)):
+            os.mkdir(lock)
+            with open(os.path.join(lock, "owner"), "w") as fh:
+                fh.write("pid=%d host=%s started=x\n" % (pid, host))
+            os.utime(lock, (time.time() - age, time.time() - age))
+            p = subprocess.run(native, cwd=nr, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=clean_env())
+            res.append(p.returncode)
+            shutil.rmtree(lock, ignore_errors=True)
+        ok("06-F7: the native script judges its lock the same way (dead owner taken, live owner kept)", res == [0, 75], res)
+    else:
+        ok("06-F7: the native script judges its lock the same way (no native shell found: counted as a failure)", False)
+
+
 def static_tests():
     print("\n=== static ===")
     raw = open(os.path.join(SCRIPTS, "sync-memory.ps1"), "rb").read()
@@ -434,7 +591,7 @@ def main(argv):
         shutil.rmtree(tmp, ignore_errors=True)
     passed = sum(RESULTS)
     print("\n%d passed, %d failed (implementations: %s)" % (passed, len(RESULTS) - passed, ", ".join(cols)))
-    expected = 2 + 13 * len(cols) + 10
+    expected = 2 + 13 * len(cols) + 20
     return 0 if passed == len(RESULTS) == expected else 1  # a run that stops early is red
 
 

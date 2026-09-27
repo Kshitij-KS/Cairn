@@ -39,6 +39,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -60,13 +61,69 @@ def git_dir():
         return None
 
 
+def _pid_alive(pid):
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        try:
+            import ctypes
+            k = ctypes.windll.kernel32
+            h = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+            if not h:
+                return False
+            code = ctypes.c_ulong()
+            ok = k.GetExitCodeProcess(h, ctypes.byref(code))
+            k.CloseHandle(h)
+            return bool(ok) and code.value == 259  # STILL_ACTIVE
+        except Exception:
+            return True  # cannot tell: assume alive, so only age can free the lock
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+    return True
+
+
 class Lock:
-    """mkdir-based, the same directory the native scripts use, so either can hold it."""
+    """mkdir-based, the same directory the native scripts use, so either can hold it.
+
+    A lock is stale when its owner is a process on THIS machine that no longer runs, or when it is
+    older than 30 minutes and its owner cannot be shown to be alive. Age alone once freed the lock
+    of a slow but live sync (recheck 06-F7). Stealing renames the stale directory first, which only
+    one process can do, and then checks it took the lock it judged stale."""
 
     def __init__(self):
         g = git_dir()
         self.path = os.path.join(g, "sync-memory.lock") if g else None
         self.held = False
+
+    @staticmethod
+    def _owner(path):
+        try:
+            with open(os.path.join(path, "owner"), encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            return {}, ""
+        return dict(re.findall(r"(\w+)=(\S+)", text)), text
+
+    def _stale(self):
+        try:
+            age = time.time() - os.path.getmtime(self.path)
+        except OSError:
+            return False, ""
+        info, text = self._owner(self.path)
+        pid = int(info["pid"]) if info.get("pid", "").isdigit() else 0
+        host = info.get("host", "")
+        here = socket.gethostname()
+        if pid and host == here:
+            return (not _pid_alive(pid)) and age > 5, text   # the owner died (5 s: let it write)
+        if pid and not host and age < STALE_SECONDS:
+            return False, text                               # a native script's lock: age decides
+        return age >= STALE_SECONDS, text
 
     def acquire(self):
         if not self.path:
@@ -74,19 +131,28 @@ class Lock:
         try:
             os.mkdir(self.path)
         except FileExistsError:
-            try:
-                age = time.time() - os.path.getmtime(self.path)
-            except OSError:
-                age = 0
-            if age < STALE_SECONDS:
+            stale, seen = self._stale()
+            if not stale:
                 return False
-            shutil.rmtree(self.path, ignore_errors=True)
+            tomb = "%s.stale-%d-%d" % (self.path, os.getpid(), int(time.time() * 1000))
+            try:
+                os.rename(self.path, tomb)
+            except OSError:
+                return False
+            if self._owner(tomb)[1] != seen:          # someone replaced it between our look and our rename
+                try:
+                    os.rename(tomb, self.path)
+                except OSError:
+                    pass
+                return False
+            shutil.rmtree(tomb, ignore_errors=True)
             try:
                 os.mkdir(self.path)
             except FileExistsError:
                 return False
         with open(os.path.join(self.path, "owner"), "w") as fh:
-            fh.write("pid=%d started=%s\n" % (os.getpid(), time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
+            fh.write("pid=%d host=%s started=%s\n" % (os.getpid(), socket.gethostname(),
+                                                      time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
         self.held = True
         return True
 
@@ -115,8 +181,22 @@ def native_command(args):
 
 # --------------------------------------------------------------------------- pull-request mode
 
+_ROOT = []
+
+
+def _top():
+    """The repository root. Every git call runs there, so a pathspec means the same thing in a
+    project tier (memory/ inside a code repository) as in the company tier: from memory/ itself a
+    root-relative path like memory/x.md was read as memory/memory/x.md."""
+    if not _ROOT:
+        p = subprocess.run(["git", "-C", NOTES_ROOT, "rev-parse", "--show-toplevel"], stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace")
+        _ROOT.append(p.stdout.strip() or NOTES_ROOT)
+    return _ROOT[0]
+
+
 def _git(*args, check=False):
-    p = subprocess.run(["git", "-C", NOTES_ROOT, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    p = subprocess.run(["git", "-c", "core.quotePath=false", "-C", _top(), *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                        text=True, encoding="utf-8", errors="replace")
     if check and p.returncode != 0:
         raise RuntimeError("git %s failed: %s" % (" ".join(args), p.stderr.strip()))
@@ -168,10 +248,29 @@ def on_default_branch():
 
 
 def who():
+    """The person's own branch name: their handle in roles.json when they are registered (handles are
+    unique), else the email's local part plus a short hash of the whole address, so two people
+    called alex at different domains never share memory/alex (recheck C)."""
     email = _git("config", "user.email").stdout.strip()
-    name = email.split("@", 1)[0] if email else _git("config", "user.name").stdout.strip()
-    slug = re.sub(r"[^a-z0-9._-]+", "-", name.lower()).strip("-.") or "someone"
-    return slug[:40]
+    if email:
+        root = repo_root()
+        rel = os.path.relpath(os.path.join(NOTES_ROOT, "governance", "roles.json"), root).replace(os.sep, "/") if root else ""
+        try:
+            people = (json.loads(_git("show", "HEAD:%s" % rel).stdout or "{}").get("people") or {}) if rel else {}
+        except ValueError:
+            people = {}
+        for handle, p in people.items():
+            if isinstance(p, dict) and not handle.startswith(("$", "__")) and \
+                    (p.get("email") or "").strip().lower() == email.lower():
+                slug = re.sub(r"[^a-z0-9._-]+", "-", handle.lower()).strip("-.")
+                if slug:
+                    return slug[:40]
+        local = email.split("@", 1)[0]
+        slug = re.sub(r"[^a-z0-9._-]+", "-", local.lower()).strip("-.") or "someone"
+        import hashlib
+        return "%s-%s" % (slug[:32], hashlib.sha1(email.lower().encode("utf-8")).hexdigest()[:6])
+    name = _git("config", "user.name").stdout.strip()
+    return (re.sub(r"[^a-z0-9._-]+", "-", name.lower()).strip("-.") or "someone")[:40]
 
 
 def repo_slug(remote):
@@ -211,14 +310,21 @@ def pr_push(env, reason):
     remote_sha = _git("rev-parse", "--verify", "-q", tracking).stdout.strip() if fetched else ""
     head = _git("rev-parse", "HEAD").stdout.strip()
     if remote_sha and remote_sha != head:
-        # Never lose work: every file the remote branch changed beyond the base must already be in
-        # HEAD with the same content (a squash-merged pull request satisfies this too).
+        # Never lose work: every file the remote branch changed beyond its merge base must already
+        # have that content in HEAD, or in the base branch. The second case is a pull request that
+        # was squash-merged and whose branch was left behind: its commits are not ancestors of
+        # anything, but its content is merged (recheck P2).
         mine = [c for c in _git("rev-list", "%s..%s" % (head, remote_sha)).stdout.split() if c]
         if mine:
-            files = sorted({f for f in _git("diff", "--name-only", "%s/%s...%s" % (remote, base, remote_sha)).stdout.split("\n") if f})
-            if files and _git("diff", "--quiet", remote_sha, head, "--", *files).returncode != 0:
-                sys.stderr.write("[memory] %s on %s holds changes this machine does not have; not overwriting it.\n"
-                                 "  Merge or close its pull request, or run: git pull %s %s\n" % (branch, remote, remote, branch))
+            files = sorted({f for f in _git("diff", "--name-only", "-z", "%s/%s...%s" % (remote, base, remote_sha)).stdout.split("\0") if f})
+            in_head = not files or _git("diff", "--quiet", remote_sha, head, "--", *files).returncode == 0
+            in_base = not files or _git("diff", "--quiet", remote_sha, "%s/%s" % (remote, base), "--", *files).returncode == 0
+            if not (in_head or in_base):
+                sys.stderr.write(
+                    "[memory] %s on %s holds changes that are neither here nor merged into %s; not overwriting it.\n"
+                    "  Its pull request is still open or was closed unmerged: merge or close it on GitHub, then\n"
+                    "  delete the branch (git push %s --delete %s) and run sync post again.\n"
+                    % (branch, remote, base, remote, branch))
                 return 1
     if remote_sha != head:
         lease = "--force-with-lease=%s:%s" % (ref, remote_sha)
@@ -253,6 +359,89 @@ def pr_push(env, reason):
     return 0
 
 
+def _z(out):
+    return [x for x in out.split("\0") if x]
+
+
+def drop_merged_commits():
+    """Drop local commits whose content upstream already has (recheck P1).
+
+    A squash-merged pull request lands as ONE new commit upstream; the local commits it came from
+    are not ancestors of it, so `pull --rebase` replays them onto content that already contains them
+    and the second edit of a file conflicts with its own result. Here: find the longest run of the
+    oldest unpushed commits whose files already read the same upstream, and move past them. Only
+    memory commits are touched, and nothing is dropped unless its content is upstream byte for byte."""
+    remote, base = upstream()
+    if not remote:
+        return
+    # Only when something is waiting: Stop hooks run this every turn, and a fetch is a round-trip.
+    if not _git("rev-list", "-1", "@{u}..HEAD").stdout.strip():
+        return
+    if _git("fetch", "--quiet", remote).returncode != 0:
+        return
+    commits = [c for c in _git("rev-list", "--reverse", "@{u}..HEAD").stdout.split() if c]
+    if not commits:
+        return
+    prefix = tier_prefix()
+    touched, contained = set(), 0
+    for i, c in enumerate(commits):
+        files = set(_z(_git("diff-tree", "--no-commit-id", "--name-only", "-r", "-z", c).stdout))
+        if prefix and any(not f.startswith(prefix) for f in files):
+            break                                  # an application commit: never ours to move
+        touched |= files
+        if touched and _git("diff", "--quiet", c, "@{u}", "--", *sorted(touched)).returncode == 0:
+            contained = i + 1
+    if not contained:
+        return
+    upto = commits[contained - 1]
+    if contained == len(commits):
+        p = _git("reset", "--quiet", "--keep", "@{u}")
+    elif _git("status", "--porcelain", "--untracked-files=no").stdout.strip():
+        return                                     # a dirty tree: let the normal pull handle it
+    else:
+        p = _git("rebase", "--quiet", "--onto", "@{u}", upto)
+        if p.returncode != 0:
+            _git("rebase", "--abort")
+            return
+    if p.returncode == 0:
+        print("[memory] %d local commit(s) were already merged upstream (a squashed pull request); "
+              "moved past them." % contained, flush=True)
+
+
+def save_index():
+    """The staged entries, so a pull's autostash cannot silently unstage them (recheck N1)."""
+    head = _git("rev-parse", "-q", "--verify", "HEAD").stdout.strip()
+    paths = _z(_git("diff", "--cached", "--name-only", "-z", "--no-renames").stdout)
+    if not head or not paths:
+        return None
+    tree = _git("write-tree").stdout.strip()
+    return {"head": head, "tree": tree, "paths": paths} if tree else None
+
+
+def restore_index(saved, skip_prefix=None):
+    """Re-stage what was staged before, for every path upstream did not change meanwhile."""
+    if not saved:
+        return
+    head = _git("rev-parse", "-q", "--verify", "HEAD").stdout.strip()
+    lost = []
+    for p in saved["paths"]:
+        if skip_prefix is not None and (skip_prefix == "" or p.startswith(skip_prefix)):
+            continue                               # committed by this post
+        if head != saved["head"] and _git("diff", "--quiet", saved["head"], head, "--", p).returncode != 0:
+            lost.append(p)
+            continue
+        entry = _git("ls-tree", "-r", "-z", saved["tree"], "--", p).stdout
+        if entry:
+            r = subprocess.run(["git", "-C", _top(), "update-index", "-z", "--index-info"], input=entry,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
+        else:
+            r = _git("update-index", "--force-remove", "--", p)
+        if r.returncode != 0:
+            lost.append(p)
+    if lost:
+        sys.stderr.write("[memory] the pull changed files you had staged; stage these again: %s\n" % ", ".join(lost[:8]))
+
+
 def after_pre(env):
     mem = os.path.join(HERE, "mem.py")
     if not os.path.isfile(mem):
@@ -266,9 +455,24 @@ def after_pre(env):
             sys.stderr.write("sync-memory: mem %s did not run: %s (ignored)\n" % (step[0], exc))
 
 
+def run_side(env, argv, stdin_text=None):
+    """A companion command in the SAME hook, in a fixed order (Kiro executes a file's hooks in an order
+    it does not promise, recheck 09-F9). Its output goes to the agent's context; it never fails the
+    sync."""
+    try:
+        p = subprocess.run([sys.executable, *argv], env=env, input=stdin_text or "", stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", timeout=60)
+        sys.stdout.write(p.stdout)
+        sys.stderr.write(p.stderr)
+    except (OSError, subprocess.SubprocessError) as exc:
+        sys.stderr.write("sync-memory: %s did not run: %s (ignored)\n" % (os.path.basename(argv[0]), exc))
+
+
 def main(argv):
     agent = "--agent" in argv
-    rest = [a for a in argv if a != "--agent"]
+    then_session = "--then-session" in argv        # pre, then `mem session start`
+    significance = "--significance" in argv        # `memory_guard significance`, then post
+    rest = [a for a in argv if a not in ("--agent", "--then-session", "--significance")]
     mode = (rest[0] if rest else "pre").strip().lower()
     if mode not in MODES:
         sys.stderr.write("sync-memory: usage: sync-memory.py pre|post|status [--agent]\n")
@@ -287,6 +491,9 @@ def main(argv):
               "are saved but not committed. Commit by hand with: uv run -q --script scripts/sync-memory.py post")
         return 0
 
+    if significance and mode == "post":
+        run_side(env, [os.path.join(HERE, "memory_guard.py"), "--notes-root", NOTES_ROOT, "significance", "--format", "text"],
+                 sys.stdin.read() if not sys.stdin.isatty() else "")
     pr_mode = mode == "post" and sync_mode(env) == "pr" and on_default_branch()
     if pr_mode:
         env["MEMORY_SYNC_DIRECT_PUSH"] = "0"   # the native script commits and rebases; we push
@@ -300,12 +507,20 @@ def main(argv):
             return EXIT_BUSY
         env["MEMORY_SYNC_LOCK_HELD"] = "1"
     try:
+        saved = None
+        if mode != "status":
+            drop_merged_commits()
+            saved = save_index()
         try:
             rc = subprocess.call(cmd, env=env)
         except KeyboardInterrupt:
             return 130
+        if saved and rc in (0, EXIT_PROTECTED):
+            restore_index(saved, skip_prefix=tier_prefix() if mode == "post" else None)
         if rc == 0 and mode == "pre":
             after_pre(env)  # still under the lock
+        if then_session and mode == "pre":
+            run_side(env, [os.path.join(HERE, "mem.py"), "--root", NOTES_ROOT, "session", "start"])
         if mode == "post" and rc == 0 and pr_mode:
             return pr_push(env, "enforcement.mode is pr")
         if mode == "post" and rc == EXIT_PROTECTED:

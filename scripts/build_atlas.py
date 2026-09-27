@@ -193,7 +193,7 @@ def in_restricted_location(rel):
     return mg.norm_path(rel).startswith("context/restricted/")
 
 
-def build_activity(ctx, public, node_paths, hidden_paths=frozenset(), show_authors=True):
+def build_activity(ctx, public, node_paths, hidden_paths=frozenset(), show_authors=True, pub_path=None):
     # The record separator goes at the START. With it at the end, --name-only puts each commit's
     # file list into the NEXT chunk, and every commit silently parses as having no files.
     fmt = "%x02%H%x01%an%x01%ad%x01%s%x01%b"
@@ -223,11 +223,22 @@ def build_activity(ctx, public, node_paths, hidden_paths=frozenset(), show_autho
         levels = [ctx.path_level(f) for f in files]
         real = [l for l in levels if l in mg.LEVEL_ORDER]
         level = max(real, key=mg.level_rank) if real else "L0"
+        if public:
+            # Only the paths of notes the map already publishes, under their public names. Code
+            # paths say how the codebase is laid out, a note's old path can be its restricted or
+            # withheld name, and neither belongs on the page (recheck D2, 07-F1).
+            rels = [f[len(ctx.prefix):] if ctx.prefix and f.startswith(ctx.prefix) else f for f in files]
+            shown = [(pub_path or {}).get(r) for r in rels if r in node_paths]
+            shown = [x for x in shown if x]
+        else:
+            shown = files
         actor = "agent" if re.search(r"Sync-Actor:\s*agent", body) else "human"
         am = re.search(r"Sync-Agent:\s*(\S+)", body)
         agent = am.group(1) if am and am.group(1) != "unknown" else None
         touched = [f for f in files
                    if f.replace(ctx.prefix, "", 1) in node_paths or f in node_paths]
+        if public:
+            touched = [(pub_path or {}).get(f.replace(ctx.prefix, "", 1) if ctx.prefix else f, f) for f in touched]
         entries.append({
             "sha": sha[:8],
             "author": author if show_authors else None,
@@ -236,7 +247,7 @@ def build_activity(ctx, public, node_paths, hidden_paths=frozenset(), show_autho
             "actor": actor,
             "agent": agent if show_authors else None,
             "files": len(files),
-            "paths": files[:6],
+            "paths": shown[:6],
             "touched": touched[:12],
             # A commit subject can carry the very thing the note bodies are withholding
             # ("promote: switch payments to the new provider at 1.9% per charge"). Withheld publicly.
@@ -803,12 +814,36 @@ def build(ctx, public=True):
     # public file, including derived fields (broken-link health, activity paths) - audit 07-F1.
     restricted = {"ids": set(), "paths": set(), "titles": set()}
 
+    # A note whose TITLE is sensitive (`public_title:` or `publish_title: false`) is published under
+    # an opaque id and path: its file name is its title as a slug, and relations name it by the real
+    # title. Keying relations on the public title lost the edge AND published the real title as a
+    # "broken link" (recheck 07-F6). The real title, id and path join the leak sweep below.
+    hidden = {"ids": set(), "paths": set(), "titles": set()}
+    pub_id, pub_path = {}, {}
+    if public:
+        masked = []
+        for rel, _a, fm, _b, _t in notes:
+            conf0 = "restricted" if in_restricted_location(rel) else (mg.fm_get(fm, "confidentiality") or "internal").strip()
+            if conf0 in ("restricted", "open"):
+                continue
+            if (mg.fm_get(fm, "publish_title") or "").lower() == "false" or mg.fm_get(fm, "public_title"):
+                masked.append(((mg.fm_get(fm, "created") or ""), rel, fm))
+        for i, (_c, rel, fm) in enumerate(sorted(masked), 1):
+            d = os.path.dirname(rel)
+            pid = (d + "/" if d else "") + "withheld-%d" % i
+            pub_id[rel], pub_path[rel] = pid, pid + ".md"
+            hidden["ids"].add(rel[:-3])
+            hidden["paths"].add(rel)
+            hidden["paths"].add((ctx.prefix + rel) if ctx.prefix else rel)
+            hidden["titles"].add((mg.fm_get(fm, "title") or os.path.basename(rel)[:-3]).strip())
+
     for rel, abs_path, fm, body, _text in notes:
         conf = (mg.fm_get(fm, "confidentiality") or "internal").strip()
         # The restricted location wins over any label: `confidentiality: open` under
         # context/restricted/ published a full body (audit 07-F7).
         if in_restricted_location(rel):
             conf = "restricted"
+        real_title = (mg.fm_get(fm, "title") or os.path.basename(rel)[:-3]).strip()
         if public and conf == "restricted":
             withheld["restricted"] += 1
             restricted["ids"].add(rel[:-3])
@@ -855,8 +890,8 @@ def build(ctx, public=True):
             withheld["briefs"] = withheld.get("briefs", 0) + 1
 
         node = {
-            "id": rel[:-3],
-            "path": rel,
+            "id": pub_id.get(rel, rel[:-3]),
+            "path": pub_path.get(rel, rel),
             "title": title,
             "folder": rel.split("/")[0],
             "type": mg.fm_get(fm, "type") or "note",
@@ -903,7 +938,9 @@ def build(ctx, public=True):
             node["title"] = "Retrieval tests"
         nodes.append(node)
         node_paths.add(rel)
-        by_title.setdefault(title, node["id"])
+        pub_id.setdefault(rel, node["id"])
+        pub_path.setdefault(rel, node["path"])
+        by_title.setdefault(real_title, node["id"])   # relations name the REAL title
 
     dependency_types = set(
         ctx.policy.get("cascade", {}).get("relation_types_followed",
@@ -912,13 +949,13 @@ def build(ctx, public=True):
     edges, unresolved, seen = [], [], set()
     id_set = {n["id"] for n in nodes}
     for rel, _abs, _fm, body, _t in notes:
-        src = rel[:-3]
+        src = pub_id.get(rel)
         if src not in id_set:
             continue  # restricted source: its edges are withheld too
         for rtype, target in relations_of(body):
             tid = by_title.get(target)
             if tid is None:
-                if public and target in restricted["titles"]:
+                if public and (target in restricted["titles"] or target in hidden["titles"]):
                     continue  # a link to a restricted note: say nothing, not even "broken"
                 unresolved.append((src, target))
                 continue
@@ -932,7 +969,7 @@ def build(ctx, public=True):
                           "dependency": rtype in dependency_types})
 
     activity = build_activity(ctx, public, node_paths, restricted["paths"] if public else set(),
-                              publish_authors or not public)
+                              publish_authors or not public, pub_path)
     health = build_health(nodes, edges, unresolved)
     arrangements = {k: build_arrangement(k, nodes, edges) for k in ("area", "time")}
 
@@ -963,7 +1000,7 @@ def build(ctx, public=True):
                              gaps=0))
     gaps = []
     for rel, _abs, _fm, body, _t in notes:
-        if not rel.startswith("log/gaps/") or rel[:-3] not in id_set:
+        if not rel.startswith("log/gaps/") or pub_id.get(rel) not in id_set:
             continue
         linked = [by_title.get(t) for _r, t in relations_of(body)]
         feature = next((x for x in linked if x in feat_ids), None)
@@ -1063,26 +1100,41 @@ def build(ctx, public=True):
         "health": health,
     }
     if public:
-        leaks = restricted_leaks(out, restricted)
+        sweep = {k: restricted[k] | hidden[k] for k in restricted}
+        leaks = restricted_leaks(out, sweep)
         if leaks:
-            mg.die("refusing to build a PUBLIC atlas: restricted names would appear in %s" % ", ".join(leaks[:5]), 5)
+            mg.die("refusing to build a PUBLIC atlas: the name of a restricted note, or a withheld title, "
+                   "would appear in %s.\n  Reword the note that mentions it (its brief is its first "
+                   "sentence), or rename the restricted note." % ", ".join(leaks[:5]), 5)
     return out
 
 
-def restricted_leaks(obj, restricted, where="$"):
-    """Every JSON location whose string value names a restricted note (id, path or title)."""
-    tokens = {t for t in (restricted["ids"] | restricted["paths"] | restricted["titles"]) if t}
+def _leak_rx(restricted):
+    tokens = sorted({t for t in (restricted["ids"] | restricted["paths"] | restricted["titles"]) if t},
+                    key=len, reverse=True)
+    if not tokens:
+        return None
+    # Whole words only: a restricted note titled "Plan" must not block every brief that says
+    # "Planning" (recheck D7). Case-insensitive, so "ACME deal" is caught for "Acme Deal".
+    return re.compile(r"(?<![\w])(?:%s)(?![\w])" % "|".join(re.escape(t) for t in tokens), re.I)
+
+
+def restricted_leaks(obj, restricted, where="$", _rx=None):
+    """Every JSON location whose key or string value names a restricted note (id, path or title)."""
+    rx = _rx if _rx is not None else _leak_rx(restricted)
+    if rx is None:
+        return []
     found = []
     if isinstance(obj, dict):
         for k, v in obj.items():
-            if isinstance(k, str) and k in tokens:
+            if isinstance(k, str) and rx.search(k):
                 found.append(where + "." + k)
-            found += restricted_leaks(v, restricted, where + "." + str(k))
+            found += restricted_leaks(v, restricted, where + "." + str(k), rx)
     elif isinstance(obj, list):
         for i, v in enumerate(obj):
-            found += restricted_leaks(v, restricted, "%s[%d]" % (where, i))
+            found += restricted_leaks(v, restricted, "%s[%d]" % (where, i), rx)
     elif isinstance(obj, str):
-        if any(t in obj for t in tokens):
+        if rx.search(obj):
             found.append(where)
     return found
 
@@ -1170,9 +1222,41 @@ def load_strict(path):
         return json.load(fh, object_pairs_hook=_no_dupes)
 
 
-def verify_public(d):
+DEFAULT_PUBLICATION = {"brief_levels": ["L0"], "publish_authors": False, "publish_commit_messages": False}
+
+
+def _items(bad, seq, types, where):
+    """Every element of a list has one of the allowed types (the closed schema typed only the list
+    itself, so a secret could ride inside tags or sample points, recheck 07-F3)."""
+    if not isinstance(seq, list):
+        return
+    for i, v in enumerate(seq):
+        if not isinstance(v, types) or (isinstance(v, bool) and bool not in (types if isinstance(types, tuple) else (types,))):
+            bad.append("%s[%d]: wrong type %s" % (where, i, type(v).__name__))
+
+
+def _values(bad, obj, types, where, key_rx=None):
+    if not isinstance(obj, dict):
+        return
+    for k, v in obj.items():
+        if key_rx is not None and not re.match(key_rx, k):
+            bad.append("%s: unexpected key %r" % (where, k[:40]))
+        if not isinstance(v, types) or isinstance(v, bool):
+            bad.append("%s.%s: wrong type %s" % (where, k[:40], type(v).__name__))
+
+
+def _point(bad, v, where, n):
+    if not (isinstance(v, list) and len(v) == n and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in v)):
+        bad.append("%s: not a point" % where)
+
+
+def verify_public(d, trusted_publication=None):
     """Closed schema, reference integrity, then every publication rule. Returns problems (empty = ok).
-    CI also compares the file with a fresh build from source (--against-source)."""
+
+    The file's own `publication` block is a claim, not a fact: a tampered file can grant itself
+    publish_authors or brief_levels "all". Without the policy (trusted_publication) the strictest
+    defaults apply, and a file claiming more is refused (recheck 07-F3). CI also compares the file
+    with a fresh build from source (--against-source)."""
     bad = []
     if not isinstance(d, dict):
         return ["the file is not a JSON object"]
@@ -1185,12 +1269,30 @@ def verify_public(d):
         return bad
     pub = d["publication"]
     _shape(bad, pub, "publication", "$.publication")
-    brief_levels = set(pub.get("brief_levels") or [])
-    authors_ok = bool(pub.get("publish_authors"))
+    _items(bad, pub.get("brief_levels"), str, "$.publication.brief_levels")
+    trusted = trusted_publication if trusted_publication is not None else DEFAULT_PUBLICATION
+    t_levels = set(trusted.get("brief_levels", ["L0"]) or [])
+    claimed = set(pub.get("brief_levels") or [])
+    if claimed - t_levels:
+        bad.append("$.publication.brief_levels: the file claims %s beyond the %s setting %s"
+                   % (sorted(claimed - t_levels), "policy's" if trusted_publication is not None else "default",
+                      sorted(t_levels)))
+    if bool(pub.get("publish_authors")) and not bool(trusted.get("publish_authors")):
+        bad.append("$.publication.publish_authors: the file claims true; the %s says false"
+                   % ("policy" if trusted_publication is not None else "default"))
+    brief_levels = t_levels & (claimed or t_levels)
+    authors_ok = bool(trusted.get("publish_authors")) and bool(pub.get("publish_authors"))
+    _items(bad, d.get("dependency_types"), str, "$.dependency_types")
+    for i, t in enumerate(d.get("dependency_types") or []):
+        if isinstance(t, str) and not re.match(r"^[a-z][a-z_]{0,31}$", t):
+            bad.append("$.dependency_types[%d]: not a relation type" % i)
     for k, v in d["levels"].items():
         if k not in _LVL:
             bad.append("$.levels: unknown level %r" % k)
         _shape(bad, v, "level", "$.levels.%s" % k)
+        if isinstance(v, dict):
+            _items(bad, v.get("paths"), str, "$.levels.%s.paths" % k)
+            _items(bad, v.get("may_change"), str, "$.levels.%s.may_change" % k)
     _shape(bad, d["withheld"], "withheld", "$.withheld")
     _shape(bad, d["stats"], "stats", "$.stats")
 
@@ -1200,6 +1302,16 @@ def verify_public(d):
         if not _shape(bad, n, "node", w, ("id", "path", "title", "level", "confidentiality", "body", "brief")):
             continue
         ids.append(n.get("id"))
+        _items(bad, n.get("tags"), str, w + ".tags")
+        _values(bad, n.get("categories"), int, w + ".categories", r"^[a-z][\w-]{0,40}$")
+        if isinstance(n.get("observation_list"), list):
+            for j, o in enumerate(n["observation_list"]):
+                if not (isinstance(o, dict) and set(o) <= {"category", "text"} and all(isinstance(x, str) for x in o.values())):
+                    bad.append("%s.observation_list[%d]: not an observation" % (w, j))
+        if n.get("level") not in _LVL:
+            bad.append("%s.level: %r" % (w, n.get("level")))
+        if n.get("confidentiality") not in ("open", "internal", "restricted"):
+            bad.append("%s.confidentiality: %r" % (w, n.get("confidentiality")))
         conf, level, path = n.get("confidentiality"), n.get("level"), n.get("path", "")
         if conf == "restricted" or path.startswith("context/restricted/"):
             bad.append("%s: restricted note present (%s)" % (w, n.get("id")))
@@ -1222,6 +1334,7 @@ def verify_public(d):
         if "trial" in n:
             _shape(bad, n["trial"], "node.trial", w + ".trial")
     idset = set(ids)
+    pathset = {n.get("path") for n in d["nodes"] if isinstance(n, dict)}
     by_id = {n.get("id"): n for n in d["nodes"] if isinstance(n, dict)}
     if len(idset) != len(ids):
         bad.append("$.nodes: duplicate ids")
@@ -1245,12 +1358,17 @@ def verify_public(d):
             if not _shape(bad, c, "cluster", cw):
                 continue
             cids.add(c.get("id"))
+            _items(bad, c.get("members"), str, cw + ".members")
             for m in c.get("members", []):
                 if m not in idset:
                     bad.append("%s.members: %r is not a public note" % (cw, m))
-            for m in (c.get("pos") or {}):
+            for m, pv in (c.get("pos") or {}).items():
                 if m not in idset:
                     bad.append("%s.pos: %r is not a public note" % (cw, m))
+                _point(bad, pv, "%s.pos[%r]" % (cw, m), 2)
+            for j, sp in enumerate(c.get("sample") or []):
+                _point(bad, sp, "%s.sample[%d]" % (cw, j), 3)
+            _values(bad, c.get("levels"), int, cw + ".levels")
             for lk in (c.get("levels") or {}):
                 if lk not in _LVL:
                     bad.append("%s.levels: unknown key %r" % (cw, lk))
@@ -1267,12 +1385,18 @@ def verify_public(d):
                 bad.append("%s: commit message published" % w)
             if not authors_ok and (a.get("author") or a.get("agent")):
                 bad.append("%s: identity published while publish_authors is false" % w)
+            _items(bad, a.get("touched"), str, w + ".touched")
+            _items(bad, a.get("paths"), str, w + ".paths")
             for t in a.get("touched", []):
-                if t not in idset and t.replace(".md", "") not in idset and not any(t.endswith(x + ".md") for x in idset):
+                if t not in pathset:
                     bad.append("%s.touched: %r is not a public note" % (w, t))
             for pth in a.get("paths", []):
                 if pth.startswith("context/restricted/") or "/context/restricted/" in pth:
                     bad.append("%s.paths: restricted path" % w)
+                elif pth not in pathset:
+                    bad.append("%s.paths: %r is not a public note (code paths are never published)" % (w, pth))
+            if a.get("level") not in _LVL or a.get("actor") not in ("agent", "human"):
+                bad.append("%s: level or actor out of range" % w)
 
     if _shape(bad, d["queue"], "queue", "$.queue"):
         for i, q in enumerate(d["queue"].get("proposals", [])):
@@ -1288,6 +1412,7 @@ def verify_public(d):
             if _shape(bad, q, "review", "$.queue.review_needed[%d]" % i) and q.get("id") not in idset:
                 bad.append("$.queue.review_needed[%d]: not a public note" % i)
 
+    _values(bad, (d.get("health") or {}).get("counts"), int, "$.health.counts")
     if _shape(bad, d["health"], "health", "$.health"):
         for i, it in enumerate(d["health"].get("issues", [])):
             if _shape(bad, it, "issue", "$.health.issues[%d]" % i) and it.get("id") not in idset:
@@ -1306,7 +1431,9 @@ def verify_public(d):
                     bad.append("%s: card published above brief_levels" % w)
                 if f.get("contract") is not None:
                     bad.append("%s: contract published" % w)
-            for r in f.get("relies_on", []) + f.get("relied_on_by", []):
+            _items(bad, f.get("relies_on"), str, w + ".relies_on")
+            _items(bad, f.get("relied_on_by"), str, w + ".relied_on_by")
+            for r in (f.get("relies_on") or []) + (f.get("relied_on_by") or []):
                 if r not in idset:
                     bad.append("%s: references a note that is not public" % w)
     for i, g in enumerate(d["gaps"]):
@@ -1349,11 +1476,17 @@ def main(argv):
     ap.add_argument("--notes-root")
     ap.add_argument("--quiet", action="store_true")
     ap.add_argument("--verify", metavar="GRAPH_JSON",
-                    help="check an existing public graph.json against the closed schema and every "
-                         "redaction rule; exit 1 on any problem")
+                    help="check an existing public graph.json: the closed schema, every redaction rule, "
+                         "and (by default) an exact match with a fresh build of the notes; exit 1 on any problem")
     ap.add_argument("--against-source", action="store_true",
-                    help="with --verify: also rebuild from the notes and require the file to match it "
-                         "exactly (apart from generated_at)")
+                    help="with --verify: rebuild from the notes and require the file to match it exactly "
+                         "(apart from generated_at). The default; kept for existing workflows")
+    ap.add_argument("--shape-only", action="store_true",
+                    help="with --verify: check the file alone, WITHOUT the notes. A file-only check cannot "
+                         "see a note relabelled `open` or a changed title, so it is never enough to publish")
+    ap.add_argument("--policy", metavar="ROLES_JSON",
+                    help="with --shape-only: the governance/roles.json whose publication settings apply "
+                         "(default: the strictest settings)")
     args = ap.parse_args(argv)
 
     if args.verify:
@@ -1362,9 +1495,25 @@ def main(argv):
         except (OSError, ValueError) as e:
             print("::error::redaction failed\n  %s" % e)
             return 1
-        bad = verify_public(d)
-        if not bad and args.against_source:
-            fresh = build(mg.Ctx(args.notes_root), public=True)
+        if args.shape_only and args.against_source:
+            print("::error::--shape-only and --against-source contradict each other")
+            return 1
+        trusted = None
+        ctx = None
+        if args.shape_only:
+            if args.policy:
+                try:
+                    with open(args.policy, encoding="utf-8") as fh:
+                        trusted = dict(DEFAULT_PUBLICATION, **(json.load(fh).get("publication") or {}))
+                except (OSError, ValueError, AttributeError) as e:
+                    print("::error::cannot read --policy: %s" % e)
+                    return 1
+        else:
+            ctx = mg.Ctx(args.notes_root)
+            trusted = dict(DEFAULT_PUBLICATION, **(ctx.policy.get("publication") or {}))
+        bad = verify_public(d, trusted)
+        if not bad and ctx is not None:
+            fresh = build(ctx, public=True)
             if canonical(fresh) != canonical(d):
                 bad.append("the file differs from a fresh public build of the notes at this commit")
         if bad:
@@ -1372,8 +1521,9 @@ def main(argv):
             for b in bad:
                 print("  " + b)
             return 1
-        print("redaction verified: %d notes, %d withheld bodies, %d experiments withheld"
-              % (d["stats"]["notes"], d["withheld"]["bodies"], d["withheld"].get("experiments", 0)))
+        print("redaction verified%s: %d notes, %d withheld bodies, %d experiments withheld"
+              % (" (shape only: the notes were not compared)" if ctx is None else " against the notes",
+                 d["stats"]["notes"], d["withheld"]["bodies"], d["withheld"].get("experiments", 0)))
         return 0
 
     ctx = mg.Ctx(args.notes_root)
@@ -1401,7 +1551,7 @@ def main(argv):
             print("  REDACTED: %d bodies and %d summary lines withheld, %d restricted notes "
                   "omitted entirely, commit messages withheld"
                   % (w["bodies"], w.get("briefs", 0), w["restricted"]))
-            bad = verify_public(data)
+            bad = verify_public(data, dict(DEFAULT_PUBLICATION, **(ctx.policy.get("publication") or {})))
             if bad:
                 print("  REDACTION FAILED - do not publish:\n    " + "\n    ".join(bad))
                 return 1

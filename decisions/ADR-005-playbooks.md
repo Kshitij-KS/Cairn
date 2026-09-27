@@ -28,10 +28,10 @@ name whoever committed them (locally and per commit in CI), and approvals given 
 person with that level, never by an agent.
 
 ## Observations
-- [decision] Trust is derived from a steps-bound approval and the run log, so it cannot go stale or be forged by editing a label
-- [decision] mem writes a guided-run file and never runs a playbook's commands; the agent asks before every step that is not a check
-- [decision] Run records live in an append-only .runs file per playbook with git's union merge
-- [risk] A summary written from a session can miss a step or keep a machine-specific value; the author reviews the draft and the guard warns on home paths, account ids, private IPs and unknown emails
+- [decision] Trust is derived from a steps-bound approval and the run log, so it cannot go stale or be forged by editing a label ^37703a
+- [decision] mem writes a guided-run file and never runs a playbook's commands; the agent asks before every step that is not a check ^09f0e8
+- [decision] Run records live in an append-only .runs file per playbook with git's union merge ^5fb8a6
+- [risk] A summary written from a session can miss a step or keep a machine-specific value; the author reviews the draft and the guard warns on home paths, account ids, private IPs and unknown emails ^609db1
 
 ## Relations
 - relates_to [[Core]]

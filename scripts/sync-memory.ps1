@@ -37,6 +37,9 @@ $Mode = $Mode.ToLowerInvariant()
 # 'Continue', not 'Stop': on Windows PowerShell 5.1 a native command writing to stderr under
 # 2>&1 with EAP=Stop raises NativeCommandError. Exit codes are checked explicitly instead.
 $ErrorActionPreference = 'Continue'
+# git writes UTF-8. Windows PowerShell decodes native output with the console code page unless told
+# otherwise, which turned non-ASCII paths into different strings before any check saw them.
+try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } catch { }
 $Remote = 'origin'
 if ($env:MEMORY_SYNC_REMOTE) { $Remote = $env:MEMORY_SYNC_REMOTE }
 $Quiet = ($env:MEMORY_SYNC_QUIET -eq '1')
@@ -55,7 +58,8 @@ $script:GitExe = $GitCmd.Source
 # `-A` in `add -A` to a parameter instead of passing it to git (06-F3). Returns stdout+stderr lines;
 # $script:GitExit holds the exit code.
 function Invoke-GitNative {
-  $out = & $script:GitExe @args 2>&1
+  # core.quotePath=false: a quoted non-ASCII path matched no tier or secret pattern (recheck U1).
+  $out = & $script:GitExe -c core.quotePath=false @args 2>&1
   $script:GitExit = $LASTEXITCODE
   return @($out | ForEach-Object { "$_" })
 }
@@ -119,9 +123,25 @@ if ($env:MEMORY_SYNC_LOCK_HELD -ne '1' -and $Mode -ne 'status') {
   $LockDir = Join-Path $GitDir 'sync-memory.lock'
   try { New-Item -ItemType Directory -Path $LockDir -ErrorAction Stop | Out-Null }
   catch {
+    # Stale when its owner is a process on this machine that is gone, or when it is 30 minutes old
+    # and its owner is not known to be alive (06-F7: age alone freed a slow, live sync's lock).
     $item = Get-Item $LockDir -ErrorAction SilentlyContinue
-    if ($item -and $item.LastWriteTime -lt (Get-Date).AddMinutes(-30)) {
-      Remove-Item $LockDir -Recurse -Force -ErrorAction SilentlyContinue
+    $owner = ''
+    try { $owner = [string](Get-Content (Join-Path $LockDir 'owner') -Raw -ErrorAction Stop) } catch { }
+    $stale = $false
+    if ($owner -match 'pid=(\d+)' ) {
+      $opid = [int]$Matches[1]
+      $ohost = ''
+      if ($owner -match 'host=(\S+)') { $ohost = $Matches[1] }
+      if ($ohost -and $ohost -eq [Environment]::MachineName) {
+        $stale = -not (Get-Process -Id $opid -ErrorAction SilentlyContinue)
+      } elseif ($item -and $item.LastWriteTime -lt (Get-Date).AddMinutes(-30)) { $stale = $true }
+    } elseif ($item -and $item.LastWriteTime -lt (Get-Date).AddMinutes(-30)) { $stale = $true }
+    $tomb = "$LockDir.stale-$PID"
+    $moved = $false
+    if ($stale) { try { Rename-Item -Path $LockDir -NewName (Split-Path -Leaf $tomb) -ErrorAction Stop; $moved = $true } catch { } }
+    if ($moved) {
+      Remove-Item $tomb -Recurse -Force -ErrorAction SilentlyContinue
       New-Item -ItemType Directory -Path $LockDir -ErrorAction SilentlyContinue | Out-Null
     } else {
       $LockDir = $null
@@ -129,7 +149,7 @@ if ($env:MEMORY_SYNC_LOCK_HELD -ne '1' -and $Mode -ne 'status') {
       exit 75
     }
   }
-  Set-Content -Path (Join-Path $LockDir 'owner') -Value ("pid=$PID started=" + (Get-Date).ToUniversalTime().ToString('s')) -ErrorAction SilentlyContinue
+  Set-Content -Path (Join-Path $LockDir 'owner') -Value ("pid=$PID host=" + [Environment]::MachineName + " started=" + (Get-Date).ToUniversalTime().ToString('s')) -ErrorAction SilentlyContinue
 }
 
 $TmpIndex = $null

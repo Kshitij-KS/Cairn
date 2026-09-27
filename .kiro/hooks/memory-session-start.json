@@ -3,23 +3,13 @@
   "hooks": [
     {
       "name": "team-memory-pull",
-      "description": "Pull the latest shared memory, register the Basic Memory project, refresh the skill copies, and report any notes flagged review_needed by a planning change. Output is added to the agent's context. Kiro IDE only: SessionStart is not available on Kiro CLI or Web, where you run `uv run -q --script scripts/sync-memory.py pre` by hand.",
+      "description": "Pull the latest shared memory, register the Basic Memory project, refresh the skill copies, report notes flagged review_needed, then open this session's ledger - in that order, in one action (Kiro does not promise the order of separate hooks). Output is added to the agent's context. Kiro IDE only: SessionStart is not available on Kiro CLI or Web, where you run `uv run -q --script scripts/sync-memory.py pre --then-session` by hand.",
       "trigger": "SessionStart",
       "action": {
         "type": "command",
-        "command": "uv run -q --script scripts/sync-memory.py pre --agent"
+        "command": "uv run -q --script scripts/sync-memory.py pre --agent --then-session"
       },
-      "timeout": 120
-    },
-    {
-      "name": "team-memory-session",
-      "description": "Open a fresh session ledger so `mem load` knows what this session has already read. Kiro sends no session id, so the ledger is per checkout (one Kiro session at a time per repo).",
-      "trigger": "SessionStart",
-      "action": {
-        "type": "command",
-        "command": "uv run -q --script scripts/mem.py session start"
-      },
-      "timeout": 30
+      "timeout": 150
     }
   ]
 }

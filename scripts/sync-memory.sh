@@ -50,6 +50,9 @@ PROJECT_KIND="$(grep -o '"kind"[[:space:]]*:[[:space:]]*"[^"]*"' "$MANIFEST" | h
 PROJECT_KIND="${PROJECT_KIND:-team}"
 
 command -v git >/dev/null 2>&1 || die "git is not installed"
+# Never let git quote a path: a quoted "scripts/\303\251vil.py" matched no tier or secret pattern
+# (recheck U1). Paths still quoted after this (a newline in a name) fail the tier checks closed.
+git() { command git -c core.quotePath=false "$@"; }
 REPO_ROOT="$(git -C "$NOTES_ROOT" rev-parse --show-toplevel 2>/dev/null)" || die "$NOTES_ROOT is not inside a git repository"
 cd "$REPO_ROOT" || die "cannot cd to $REPO_ROOT"
 
@@ -100,11 +103,22 @@ cleanup() { [ -n "$TMP_INDEX" ] && rm -f "$TMP_INDEX" "$TMP_INDEX.lock"; [ -n "$
 if [ "${MEMORY_SYNC_LOCK_HELD:-0}" != "1" ] && [ "$MODE" != "status" ]; then
   LOCK_DIR="$(git rev-parse --absolute-git-dir)/sync-memory.lock"
   if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-    # stale only if older than 30 minutes; a busy lock is exit 75, never a silent success (06-F7)
-    if [ -n "$(find "$LOCK_DIR" -maxdepth 0 -mmin +30 2>/dev/null)" ]; then rm -rf "$LOCK_DIR"; mkdir "$LOCK_DIR" 2>/dev/null || die "could not acquire lock $LOCK_DIR"
+    # A busy lock is exit 75, never a silent success (06-F7). Stale when its owner is a process on
+    # this machine that is gone, or when it is 30 minutes old and its owner is not known to be alive.
+    owner="$(cat "$LOCK_DIR/owner" 2>/dev/null || true)"
+    opid="$(printf '%s' "$owner" | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p')"
+    ohost="$(printf '%s' "$owner" | sed -n 's/.*host=\([^ ]*\).*/\1/p')"
+    stale=0
+    if [ -n "$opid" ] && [ "$ohost" = "$(hostname 2>/dev/null)" ]; then
+      kill -0 "$opid" 2>/dev/null || stale=1
+    elif [ -n "$(find "$LOCK_DIR" -maxdepth 0 -mmin +30 2>/dev/null)" ]; then
+      stale=1
+    fi
+    if [ "$stale" = 1 ] && mv "$LOCK_DIR" "$LOCK_DIR.stale-$$" 2>/dev/null; then
+      rm -rf "$LOCK_DIR.stale-$$"; mkdir "$LOCK_DIR" 2>/dev/null || { LOCK_DIR=""; printf '%s another sync is running; not syncing now.\n' "$TAG" >&2; exit 75; }
     else LOCK_DIR=""; printf '%s another sync is running; not syncing now.\n' "$TAG" >&2; exit 75; fi
   fi
-  printf 'pid=%s started=%s\n' "$$" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$LOCK_DIR/owner" 2>/dev/null || true
+  printf 'pid=%s host=%s started=%s\n' "$$" "$(hostname 2>/dev/null || echo '?')" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$LOCK_DIR/owner" 2>/dev/null || true
 fi
 trap cleanup EXIT
 

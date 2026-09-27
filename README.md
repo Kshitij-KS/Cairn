@@ -5,7 +5,7 @@ tags: [readme, onboarding, canonical]
 level: L2
 confidentiality: internal
 created: 2026-09-27
-updated: 2026-09-27
+updated: 2026-09-28
 ---
 # Cairn
 
@@ -466,12 +466,20 @@ scripts/new-project-memory.sh /path/to/your-repo          # macOS / Linux
 scripts\new-project-memory.ps1 C:\path\to\your-repo       # Windows
 ```
 
+Both run `scripts/new_project_memory.py`, so they behave the same everywhere (Python 3 is needed
+anyway: the guard is Python). It prints the exact `git add` and `git commit` to run next, `.github`
+included; run them as printed.
+
 This creates `your-repo/memory/` with its own notes, guard, policy and sync scripts, and the agent
 configuration for Claude Code, Kiro and Cursor. On GitHub it adds a `memory-gate` workflow that
 judges any pull request touching `memory/` with the base revision's guard, and a marked block of
-`/memory/...` lines in `.github/CODEOWNERS` (the product's own code owners are never touched). It
-never overwrites a file; where one already exists it writes a `.team-memory.suggested` file for you
-to merge, and running it again changes nothing. Agents then search both tiers, project first.
+`/memory/...` lines in `.github/CODEOWNERS`, which also covers that workflow and CODEOWNERS itself
+(the product's own code owners are never touched; keep the memory block last in the file). The new
+tier starts clean under its own guard, and a local pre-commit hook checks commits that touch
+`memory/`. It never overwrites a file; where one already exists it writes a `.team-memory.suggested`
+file for you to merge, and running it again changes nothing. When the company's scripts or policy
+change, a rerun says DRIFT; `--update` refreshes the scripts. Inside a project, `context/`,
+`decisions/` and `CORE.md` are L1: the project's maintainers own them. Agents then search both tiers, project first.
 
 ---
 

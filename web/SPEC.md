@@ -36,8 +36,8 @@ loop is alive, which page views would not.
 - **Queue.** Open proposals and notes carrying `review_needed`, each with its age.
 - **Health.** Orphan notes, unfilled `TODO` placeholders, stale notes, unresolved relations. Each
   item links to the file.
-- **Pulse.** Recent activity: level, whether a person or an agent wrote it, files touched. Commit
-  messages are withheld by default.
+- **Pulse.** Recent activity: level, whether a person or an agent wrote it, how many files, and
+  which published notes it touched. Code paths and commit messages are never published.
 - Notes are addressable: the selected note is in the URL.
 
 Out of scope: editing anything from the page (the write path is the guard; routing writes around
@@ -68,12 +68,14 @@ The brief is limited by level because a note's first sentence is often its subst
 strategy note, publishing it undoes the redaction beside it. Commit messages are withheld because a
 message like `promote: switch payments to the new provider at 1.9% per charge` is a leak wearing a
 changelog's clothing. Authors are withheld when `publish_authors` is false. A sensitive title can
-be replaced with `public_title:` or hidden with `publish_title: false`.
+be replaced with `public_title:` or hidden with `publish_title: false`; such a note is published
+under an opaque id and path, and relations to it still resolve.
 
 The generator refuses to write a public build if any note has no `confidentiality` field. The
-public file has a closed schema, and `build_atlas.py --verify graph.json --against-source` rebuilds
-it from the notes and fails on any difference, any unknown key, any duplicate key, and any trace of
-a restricted note. `--full` produces the unredacted build for local use; it is never deployed.
+public file has a closed schema, and `build_atlas.py --verify graph.json` rebuilds it from the
+notes (by default) and fails on any difference, any unknown key or wrongly typed value, any
+duplicate key, publication settings the policy does not grant, and any trace of a restricted note or
+a withheld title. `--full` produces the unredacted build for local use; it is never deployed.
 
 ## Level of detail
 

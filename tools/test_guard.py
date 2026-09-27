@@ -34,7 +34,7 @@ def ok(name, cond, detail=""):
 def sh(cwd, *cmd, env=None):
     e = dict(os.environ)
     for k in ("MEMORY_ACTOR_KIND", "MEMORY_ACTOR_EMAIL", "MEMORY_AGENT", "CLAUDE_CODE_SESSION_ID", "CLAUDECODE",
-              "CLAUDE_CODE_ENTRYPOINT", "KIRO_AGENT", "CURSOR_AGENT"):
+              "CLAUDE_CODE_ENTRYPOINT", "KIRO_AGENT", "CURSOR_AGENT", "MEMORY_POLICY_REF", "GIT_INDEX_FILE"):
         e.pop(k, None)
     e.update(env or {})
     p = subprocess.run(list(cmd), cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,

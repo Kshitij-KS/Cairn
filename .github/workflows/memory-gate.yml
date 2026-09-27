@@ -104,7 +104,7 @@ jobs:
         run: |
           set -euo pipefail
           LEVEL=$(python base/scripts/memory_guard.py --notes-root head \
-            classify --range "$BASE_SHA...$HEAD_SHA" --policy-ref "$BASE_SHA")
+            classify --range "$BASE_SHA...$HEAD_SHA" --policy-ref "$BASE_SHA" --require-owned)
           case "$LEVEL" in L0|L1|L2|L3) ;; *) echo "::error::classifier returned '$LEVEL'"; exit 1 ;; esac
           echo "level=$LEVEL" >> "$GITHUB_OUTPUT"
           echo "This pull request needs $LEVEL review."

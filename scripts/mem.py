@@ -77,7 +77,7 @@ mg = _load_guard()
 EXIT_OK, EXIT_FAIL, EXIT_AMBIGUOUS, EXIT_DENIED, EXIT_INVALID = 0, 1, 2, 4, 5
 DEP_TYPES_DEFAULT = ("depends_on", "implements", "part_of", "supersedes")
 MODES = ("orient", "build", "change", "debug", "review", "plan", "explain")
-DEPTH_RANK = {"title": 0, "card": 1, "full": 2}
+DEPTH_RANK = {"title": 0, "card": 1, "contract": 2, "full": 3}
 STOP = set("""a an and are as at be but by can do does for from how i if in into is it its of on or
 our so that the their them then there these this to up us was we what when where which who why will
 with would you your should could all any some make get need want please just""".split())
@@ -158,18 +158,23 @@ class Local:
 
     def __init__(self, notes_root):
         self.root = os.path.join(notes_root, ".memory")
-        for d in ("cache", "bundles", "session", "logs", "pack"):
+        for d in ("cache", "bundles", "session", "logs", "pack", "locks"):
             os.makedirs(os.path.join(self.root, d), exist_ok=True)
 
     def path(self, *parts):
         return os.path.join(self.root, *parts)
 
     def read_json(self, rel, default):
+        """A local file, or `default` when it is missing, unreadable, not JSON, or the wrong kind of
+        JSON: `prefs.json` holding `[]` crashed every load (recheck N4)."""
         try:
             with open(self.path(rel), encoding="utf-8") as fh:
-                return json.load(fh)
+                data = json.load(fh)
         except (OSError, ValueError):
             return default
+        if default is not None and not isinstance(data, type(default)):
+            return default
+        return data
 
     def write_bytes(self, abspath, data):
         tmp = "%s.%d.%s.tmp" % (abspath, os.getpid(), os.urandom(4).hex())
@@ -190,14 +195,39 @@ class Local:
         self.write_bytes(self.path(rel), json.dumps(data, indent=1, sort_keys=True).encode("utf-8"))
 
     def prefs(self):
-        return self.read_json("prefs.json", {"pins": [], "mutes": []})
+        d = self.read_json("prefs.json", {"pins": [], "mutes": []})
+        for k in ("pins", "mutes"):
+            v = d.get(k)
+            d[k] = [x for x in v if isinstance(x, str) and x.strip()] if isinstance(v, list) else []
+        return d
+
+    def note_lock(self, abspath, timeout=15.0):
+        """One writer at a time for a shared file mem edits (a playbook, its run log): concurrent
+        `playbook log` calls lost 7 of 64 lines (recheck N2)."""
+        key = hashlib.sha256(os.path.normcase(os.path.abspath(abspath)).encode("utf-8")).hexdigest()[:24]
+        return _FileLock(self.path("locks", key + ".lock"), timeout)
+
+    def write_note(self, abspath, text):
+        """Atomic: a reader sees the old file or the new one, never half of it."""
+        self.write_bytes(abspath, text.encode("utf-8"))
 
     def salt(self):
         p = self.path("salt")
         if not os.path.isfile(p):
             self.write_bytes(p, os.urandom(16).hex().encode("ascii"))
-        with open(p) as fh:
-            return fh.read().strip()
+            try:
+                os.chmod(p, 0o600)
+            except OSError:
+                pass
+        try:
+            with open(p, encoding="ascii") as fh:
+                v = fh.read().strip()
+        except (OSError, UnicodeDecodeError):
+            v = ""
+        if not re.match(r"^[0-9a-f]{32}$", v):   # damaged: start a new one (old cache blocks just miss)
+            v = os.urandom(16).hex()
+            self.write_bytes(p, v.encode("ascii"))
+        return v
 
     def session_id(self, explicit=None):
         sid = explicit or os.environ.get("MEMORY_SESSION") or os.environ.get("CLAUDE_CODE_SESSION_ID")
@@ -250,23 +280,90 @@ class Local:
         """Delete cached note blocks and bundles (all, or those untouched for N days). They are plain
         copies of note text, so retention is bounded (audit 04-F9)."""
         n, cutoff = 0, (time.time() - older_than_days * 86400) if older_than_days else None
+        victims = []
         for d in ("cache", "bundles"):
-            for fn in os.listdir(self.path(d)):
-                fp = self.path(d, fn)
-                try:
-                    if cutoff is None or os.path.getmtime(fp) < cutoff:
-                        os.remove(fp)
-                        n += 1
-                except OSError:
-                    pass
+            victims += [self.path(d, fn) for fn in os.listdir(self.path(d))]
+        # Playbook placeholder values can be credentials, and per-session marks pile up: both are
+        # purged too (recheck N6). Placeholders go with `session purge` and after the retention time.
+        for fn in os.listdir(self.root):
+            if fn == "placeholders.json" or fn.startswith(("prompted-", "playbook-begin-")):
+                victims.append(self.path(fn))
+        for fp in victims:
+            try:
+                if cutoff is None or os.path.getmtime(fp) < cutoff:
+                    os.remove(fp)
+                    n += 1
+            except OSError:
+                pass
         return n
 
 
+def _pid_alive(pid):
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        try:
+            import ctypes
+            k = ctypes.windll.kernel32
+            h = k.OpenProcess(0x1000, False, pid)
+            if not h:
+                return False
+            code = ctypes.c_ulong()
+            ok = k.GetExitCodeProcess(h, ctypes.byref(code))
+            k.CloseHandle(h)
+            return bool(ok) and code.value == 259
+        except Exception:
+            return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
 class _FileLock:
-    """Cross-platform exclusive lock: O_CREAT|O_EXCL on a lock file, stale after 60 s."""
+    """Cross-platform exclusive lock: O_CREAT|O_EXCL on a lock file holding the owner's pid.
+
+    Stale when the owner is gone, or after 60 s. A stale lock is renamed away first (only one waiter
+    can do that) and the renamed file must still be the one judged stale; deleting it directly let
+    two waiters each remove the other's fresh lock."""
 
     def __init__(self, path, timeout):
         self.path, self.timeout, self.fd = path, timeout, None
+
+    def _try_steal(self):
+        try:
+            age = time.time() - os.path.getmtime(self.path)
+            with open(self.path, encoding="ascii", errors="replace") as fh:
+                seen = fh.read().strip()
+        except OSError:
+            return True                      # it vanished: try again at once
+        pid = int(seen) if seen.isdigit() else 0
+        if not ((pid and not _pid_alive(pid) and age > 1) or age > 60):
+            return False
+        tomb = "%s.stale-%d-%s" % (self.path, os.getpid(), os.urandom(3).hex())
+        try:
+            os.rename(self.path, tomb)
+        except OSError:
+            return True
+        try:
+            with open(tomb, encoding="ascii", errors="replace") as fh:
+                still = fh.read().strip()
+        except OSError:
+            still = None
+        if still != seen:
+            try:
+                os.rename(tomb, self.path)  # not the lock we judged: put it back
+            except OSError:
+                pass
+            return False
+        try:
+            os.remove(tomb)
+        except OSError:
+            pass
+        return True
 
     def __enter__(self):
         deadline = time.time() + self.timeout
@@ -276,14 +373,10 @@ class _FileLock:
                 os.write(self.fd, ("%d" % os.getpid()).encode())
                 return self
             except FileExistsError:
-                try:
-                    if time.time() - os.path.getmtime(self.path) > 60:
-                        os.remove(self.path)
-                        continue
-                except OSError:
+                if self._try_steal():
                     continue
                 if time.time() > deadline:
-                    die("another mem command holds the session lock (%s); try again" % self.path, 1)
+                    die("another mem command holds the lock (%s); try again" % self.path, 1)
                 time.sleep(0.02)
 
     def __exit__(self, *exc):
@@ -296,29 +389,38 @@ class _FileLock:
         return False
 
 
-CACHE_MAGIC = "<!-- mem-cache v1 "
+CACHE_MAGIC = "<!-- mem-cache v2 "
 
 
-def cache_read(path, note_hash, depth):
+def _cache_mac(local, note_hash, depth, block):
+    import hmac
+    msg = ("%s\0%s\0" % (note_hash, depth)).encode("utf-8") + block.encode("utf-8")
+    return hmac.new(local.salt().encode("ascii"), msg, hashlib.sha256).hexdigest()
+
+
+def cache_read(path, note_hash, depth, local=None):
     """A cached block is used only if its envelope names this exact note version and depth and its
-    digest matches its bytes. A tampered or truncated cache file used to be served as context
-    (audit 04-F4)."""
+    MAC matches. The MAC is keyed by this machine's salt, so a block written by anything that has not
+    read .memory/salt (a tool, a pasted file, an agent editing files) is never served; a plain sha256
+    could be recomputed by whoever forged the block (recheck 04-F4). It does not stop a process that
+    can read the salt: that process can edit the notes themselves."""
     try:
         with open(path, encoding="utf-8") as fh:
             head = fh.readline()
             block = fh.read()
     except (OSError, UnicodeDecodeError):
         return None
-    m = re.match(r"^<!-- mem-cache v1 ([0-9a-f]+) (\w+) ([0-9a-f]{64}) -->\n$", head)
-    if not m or m.group(1) != note_hash or m.group(2) != depth:
+    m = re.match(r"^<!-- mem-cache v2 ([0-9a-f]+) (\w+) ([0-9a-f]{64}) -->\n$", head)
+    if not m or m.group(1) != note_hash or m.group(2) != depth or local is None:
         return None
-    if hashlib.sha256(block.encode("utf-8")).hexdigest() != m.group(3):
+    import hmac
+    if not hmac.compare_digest(_cache_mac(local, note_hash, depth, block), m.group(3)):
         return None
     return block
 
 
 def cache_write(local, path, note_hash, depth, block):
-    head = "%s%s %s %s -->\n" % (CACHE_MAGIC, note_hash, depth, hashlib.sha256(block.encode("utf-8")).hexdigest())
+    head = "%s%s %s %s -->\n" % (CACHE_MAGIC, note_hash, depth, _cache_mac(local, note_hash, depth, block))
     local.write_bytes(path, (head + block).encode("utf-8"))
 
 
@@ -627,10 +729,9 @@ def trial_for_person(ctx, corpus):
     """Canary by person: a live trial listing this person in `for:` applies automatically."""
     if not ctx.handle:
         return None
-    for t in live_trials(corpus):
-        if not t["expired"] and ctx.handle in t["for"]:
-            return t
-    return None
+    mine = sorted((t for t in live_trials(corpus) if not t["expired"] and ctx.handle in t["for"]),
+                  key=lambda t: t["id"])
+    return mine[0] if mine else None
 
 
 # --------------------------------------------------------------------------- the engine
@@ -651,6 +752,10 @@ class Mem:
             overlay = next((t for t in live_trials(base) if t["id"].endswith("/" + info["trial"])), None)
             if not overlay:
                 die("no live trial %r" % info["trial"])
+            if overlay["expired"]:
+                # An expired trial kept applying to anyone who named it (recheck 05-F7).
+                die("trial %r expired on %s; `mem expire` closes it, or reopen it with a new expiry"
+                    % (info["trial"], overlay["expires"]), EXIT_INVALID)
         elif trial == "auto" and not info.get("past"):
             overlay = trial_for_person(self.ctx, base)
         if overlay:
@@ -701,7 +806,8 @@ def detect_mode(ask, function=None, extra_symptoms=()):
         ("review", r"\breview\b|\baudit\b|pull request|\bpr\b|\bdiff\b"),
         ("explain", r"\bwhy (?:do|does|did|is|are|we)\b|\bexplain\b|\bhow does\b|\bwhat is\b"),
         ("debug", r"\bbug\b|\bbroken\b|\bfail(?:s|ing|ed|ure)?\b|\berrors?\b|\bcrash\w*|\bregress\w*|"
-                  r"\bflaky\b|not working|doesn'?t work|\bfix\b"),
+                  r"\bflaky\b|not working|doesn'?t work|\bfix\b|\bdebug\w*|\btroubleshoot\w*|"
+                  r"\binvestigat\w*|\bdiagnos\w*"),
         ("change", r"\bchange\b|\bmodify\b|\brefactor\w*|\bremove\b|\bdelete\b|\brename\b|\bmigrate\b|"
                    r"\breplace\b|\bdeprecate\b|\bsplit\b|\brewrite\b|\bmove\b"),
         ("build", r"\badd\b|\bimplement\b|\bcreate\b|\bbuild\b|\bintroduce\b|\bsupport\b|\bnew\b"),
@@ -734,16 +840,27 @@ def detect_mode(ask, function=None, extra_symptoms=()):
     return "build", "A GUESS: no intent word or symptom; if this is a bug, rerun with --mode debug"
 
 
+PATH_TOKEN = re.compile(r"(?:[A-Za-z]:)?[\w.\-]*[\\/][^\s\"'`,;]+|[\w\-]+\.[A-Za-z0-9]{1,6}\b|\b\w+_\w+\b")
+
+
 def path_tokens(ask):
-    return [t for t in re.findall(r"[\w./-]+", ask or "") if ("." in t or "/" in t or "_" in t) and len(t) > 3]
+    """File paths in the ask, with Windows separators made /. A path names ONE file; its folder
+    words (users, home, the repository's name) are not the ask's words."""
+    return [t.replace("\\", "/").strip("/") for t in PATH_TOKEN.findall(ask or "") if len(t) > 3]
+
+
+def without_paths(ask):
+    return PATH_TOKEN.sub(" ", ask or "")
 
 
 def resolve(mem, corpus, ask, touching=(), names=()):
     """Rank features for this ask. Returns (ranked [(score, note, reasons)], confident)."""
     feats = corpus.features()
     scores = {f["id"]: [0.0, []] for f in feats}
-    ask_l = (ask or "").lower()
-    aw = set(words(ask))
+    # Word matching ignores the paths in the ask: the folders of "fix C:\\...\\export_layouts.mjs"
+    # pulled a second feature in as a full target (recheck 03-F6). Paths resolve below, by file.
+    ask_l = without_paths(ask).lower()
+    aw = set(words(without_paths(ask)))
     root = mg.code_root(mem.ctx)
     files = mg.code_files(root) if root else []
 
@@ -796,7 +913,16 @@ def resolve(mem, corpus, ask, touching=(), names=()):
     # a file named in the ask resolves to whatever covers it
     for tok in path_tokens(ask):
         base = tok.split("/")[-1].lower()
-        matched = [x for x in files if x.lower().endswith("/" + base) or x.lower() == tok.lower()]
+        # the longest tail of the path that is a real file: C:/Users/me/repo/src/x.py -> src/x.py
+        parts = tok.lower().split("/")
+        matched = []
+        for k in range(len(parts)):
+            tail = "/".join(parts[k:])
+            matched = [x for x in files if x.lower() == tail]
+            if matched:
+                break
+        if not matched:
+            matched = [x for x in files if x.lower().endswith("/" + base) or x.lower() == base]
         for f in feats:
             if any(any(mg.glob_match(g, x) for g in f["covers"]) for x in matched[:50]):
                 scores[f["id"]][0] += 10
@@ -877,8 +1003,10 @@ def build_scope(mem, corpus, mode, targets):
             put(t, "full", "target")
         return items
 
+    # A review needs what a feature PROMISES, not how it is built: the card and the full contract.
+    # Loading the whole note put implementation detail into every review (recheck 03-F2).
     for t in targets:
-        put(t, "full", "target")
+        put(t, "contract" if mode == "review" else "full", "target")
 
     if mode in ("build", "debug"):
         for nid, _h in corpus.hops(targets, "up", up_n):
@@ -891,9 +1019,6 @@ def build_scope(mem, corpus, mode, targets):
         for nid, _h in corpus.hops(targets, "up", 1):
             put(nid, "card", "relies on")
     elif mode == "review":
-        for c in targets:
-            if corpus.notes[c]["contract"]:
-                put(c, "full", "target")
         for nid, _h in corpus.hops(targets, "down", 1):
             put(nid, "card", "could break")
     elif mode == "explain":
@@ -905,11 +1030,23 @@ def build_scope(mem, corpus, mode, targets):
                     put(src, "full", "the decision")
                 if dst == t and rtype == "implements":
                     put(src, "card", "implemented by")
-        chain = list(items)
-        for nid in chain:
-            for (src, dst, rtype, _dep) in corpus.edges:
-                if rtype == "supersedes" and nid in (src, dst):
-                    put(dst if src == nid else src, "full", "the decision")
+        # The whole supersede chain, both directions: one hop left Decision Two and One out when
+        # Four superseded Three (recheck 03-F4). Bounded, and a cycle cannot loop.
+        frontier, seen_d = [n for n, (_d, r) in items.items() if r == "the decision"], set()
+        for _hop in range(12):
+            nxt = []
+            for nid in frontier:
+                if nid in seen_d:
+                    continue
+                seen_d.add(nid)
+                for (src, dst, rtype, _dep) in corpus.edges:
+                    if rtype == "supersedes" and nid in (src, dst):
+                        other = dst if src == nid else src
+                        put(other, "card" if other not in items else items[other][0], "superseded chain")
+                        nxt.append(other)
+            frontier = nxt
+            if not frontier:
+                break
 
     if mode == "debug":
         related = set(items)
@@ -918,9 +1055,9 @@ def build_scope(mem, corpus, mode, targets):
         for n in corpus.notes.values():
             if not n["path"].startswith("log/"):
                 continue
-            d = parse_date(n["updated"])
-            if d and d < cutoff:
-                continue
+            d = parse_date(n["updated"]) or parse_date(n.get("created"))
+            if not d or d < cutoff:
+                continue   # an undated note is not known to be recent (recheck 03-F7)
             links = {corpus.by_title.get(t.lower()) for _r, t in n["relations"]}
             if links & related or any(t in n["body"].lower() for t in titles):
                 put(n["id"], "full", "recent history")
@@ -929,11 +1066,28 @@ def build_scope(mem, corpus, mode, targets):
 
 # --------------------------------------------------------------------------- rendering
 
-def feature_map(corpus):
+FEATURE_MAP_MAX = 40
+
+
+def feature_map(corpus, keep=()):
+    """One line per feature, capped: at 200 features the map alone was ~5,500 tokens in every bundle
+    (recheck 03-F9). Past the cap it lists the features this load is about, then the rest by name
+    only, and says how to see the whole map."""
     lines = ["## Feature map", ""]
     feats = sorted(corpus.features(), key=lambda f: f["title"].lower())
     if not feats:
         return "## Feature map\n\n_No features yet. `mem feature new \"<name>\"` creates one._\n"
+    rest = []
+    if len(feats) > FEATURE_MAP_MAX:
+        keep = set(keep)
+        near = set(keep)
+        for k in keep:
+            near |= set(corpus.up.get(k, ())) | set(corpus.down.get(k, ()))
+        shown = [f for f in feats if f["id"] in near][:FEATURE_MAP_MAX]
+        if len(shown) < FEATURE_MAP_MAX:
+            shown += [f for f in feats if f not in shown][:FEATURE_MAP_MAX - len(shown)]
+        rest = [f for f in feats if f not in shown]
+        feats = sorted(shown, key=lambda f: f["title"].lower())
     for f in feats:
         first = re.split(r"(?<=[.!?])\s", re.sub(r"\s+", " ", f["card"] or "").strip())[0]
         deps = sorted({corpus.notes[t]["title"] for t in corpus.up[f["id"]]
@@ -941,6 +1095,9 @@ def feature_map(corpus):
         lines.append("- **%s** (%s, owner %s)%s — %s" % (
             f["title"], f["status"] or "?", f["owner"] or "?",
             ("; relies on " + ", ".join(deps)) if deps else "", first))
+    if rest:
+        lines += ["", "_%d more features (`mem features` lists them all): %s_" % (
+            len(rest), ", ".join(f["title"] for f in rest[:80]) + (", ..." if len(rest) > 80 else ""))]
     return "\n".join(lines) + "\n"
 
 
@@ -951,6 +1108,9 @@ def render_block(corpus, nid, depth):
     head = "### %s  (%s)\n<!-- note %s · %s -->\n" % (n["title"], meta, n["path"], n["hash"][:12])
     if depth == "title":
         return "- %s  (%s)\n" % (n["title"], meta)
+    if depth == "contract":
+        return head + "\n" + (n["card"] or "_no card_").strip() + "\n\n**Contract:**\n" + \
+            ((n["contract"] or "_no contract_").strip()) + "\n\n"
     if depth == "card":
         extra = ""
         if n["contract"]:
@@ -959,8 +1119,8 @@ def render_block(corpus, nid, depth):
     return head + "\n" + n["body"].strip() + "\n\n"
 
 
-ROLE_ORDER = ["core", "about", "target", "the decision", "implemented by", "relies on", "could break", "recent history",
-              "feature cards", "open decisions", "waiting proposals", "gaps", "recent change", "pinned"]
+ROLE_ORDER = ["core", "about", "target", "the decision", "superseded chain", "implemented by", "relies on", "could break", "recent history",
+              "feature cards", "open decisions", "waiting proposals", "gaps", "recent change", "added", "pinned"]
 
 
 
@@ -1328,15 +1488,29 @@ def caveats_by_step(body):
 
 
 def placeholder_values(mem, sets):
-    saved = mem.local.read_json("placeholders.json", {})
+    """Values for <PLACEHOLDERS>. Kept on this machine between runs of one replay, except anything
+    that looks like a credential: that fills this output and is never written down (recheck N6)."""
+    raw = mem.local.read_json("placeholders.json", {})
+    saved = {k: v for k, v in raw.items() if isinstance(k, str) and isinstance(v, str)}   # N5: wrong shapes
+    now, secret = {}, []
     for s_ in sets or []:
         if "=" not in s_:
             die("--set takes NAME=VALUE, got %r" % s_, EXIT_INVALID)
         k, v = s_.split("=", 1)
-        saved[k.strip().strip("<>").upper()] = v
+        k = k.strip().strip("<>").upper()
+        if not re.match(r"^[A-Z][A-Z0-9_]{0,40}$", k):
+            die("placeholder names are UPPER_CASE, got %r" % k, EXIT_INVALID)
+        now[k] = v
+        if any(re.search(rx, v) for rx, _label in mg.SECRET_CONTENT) or re.search(r"(?i)(token|secret|password|passwd|key)$", k):
+            secret.append(k)
+        else:
+            saved[k] = v
     if sets:
         mem.local.write_json("placeholders.json", saved)
-    return saved
+    if secret:
+        sys.stderr.write("mem: %s looks like a credential, so it fills this output only and is not saved\n"
+                         % ", ".join(secret))
+    return dict(saved, **now)
 
 
 def fill(text, values):
@@ -1416,8 +1590,9 @@ def cmd_pb_log(mem, a):
         die("your git identity is not in governance/roles.json, so a run cannot be attributed to you", EXIT_DENIED)
     note = re.sub(r"\s+", " ", (a.note or "").strip())[:200]
     line = "%s %s %s %s%s" % (today(), who, a.outcome, b["trust"]["steps"], (" " + note) if note else "")
-    prev = mg.read_text(b["runs_path"]) if os.path.isfile(b["runs_path"]) else ""
-    mg.write_text(b["runs_path"], prev + ("" if not prev or prev.endswith("\n") else "\n") + line + "\n")
+    with mem.local.note_lock(b["runs_path"]):
+        prev = mg.read_text(b["runs_path"]) if os.path.isfile(b["runs_path"]) else ""
+        mem.local.write_note(b["runs_path"], prev + ("" if not prev or prev.endswith("\n") else "\n") + line + "\n")
     t = mg.playbook_trust(b["tierobj"].ctx, b["fm"], b["body"], mg.parse_runs(prev + line + "\n")[0])
     print("mem: logged %s for %s by %s. Trust is now %s." % (a.outcome, b["id"], who, trust_text(t)))
     return EXIT_OK
@@ -1428,6 +1603,11 @@ def cmd_pb_caveat(mem, a):
     if a.step is not None and a.step not in [s_["n"] for s_ in b["steps"]]:
         die("%s has no step %d" % (b["id"], a.step), EXIT_INVALID)
     item = "- [%s] %s%s" % (a.kind, ("(step %d) " % a.step) if a.step is not None else "", re.sub(r"\s+", " ", a.text.strip()))
+    with mem.local.note_lock(b["path"]):
+        return _add_caveat(mem, b, item)
+
+
+def _add_caveat(mem, b, item):
     text = mg.read_text(b["path"])
     if re.search(r"(?m)^##\s+Caveats\s*$", text):
         lines = text.split("\n")
@@ -1441,7 +1621,7 @@ def cmd_pb_caveat(mem, a):
         text = "\n".join(lines)
     else:
         text = re.sub(r"(?m)^(##\s+Verify|##\s+Relations)", "## Caveats\n%s\n\n\\1" % item.replace("\\", "\\\\"), text, count=1)
-    mg.write_text(b["path"], text)
+    mem.local.write_note(b["path"], text)
     print("mem: added to %s: %s" % (b["id"], item))
     return EXIT_OK
 
@@ -1455,10 +1635,11 @@ def cmd_pb_approve(mem, a):
         die("only a person approves a playbook; ask them to run `mem playbook approve %s` in their own terminal" % b["id"], EXIT_DENIED)
     if not mg.level_allows(mg.person_level(ctx, who["handle"]), need):
         die("approving needs %s; you are %s" % (need, who["role"]), EXIT_DENIED)
-    text = mg.read_text(b["path"])
-    fm, body = mg.split_frontmatter(text)
-    fm = mg.fm_set(mg.fm_set(fm or [], "approved_by", who["handle"]), "approved_steps", mg.steps_hash(body))
-    mg.write_text(b["path"], mg.render(fm, body))
+    with mem.local.note_lock(b["path"]):
+        text = mg.read_text(b["path"])
+        fm, body = mg.split_frontmatter(text)
+        fm = mg.fm_set(mg.fm_set(fm or [], "approved_by", who["handle"]), "approved_steps", mg.steps_hash(body))
+        mem.local.write_note(b["path"], mg.render(fm, body))
     print("mem: %s approved by %s against steps %s. Editing a step later drops the approval by itself."
           % (b["id"], who["handle"], mg.steps_hash(body)))
     return EXIT_OK
@@ -1495,10 +1676,12 @@ def cmd_pb_begin(mem, a):
 
 def cmd_pb_since(mem, a):
     sid = mem.local.session_id(getattr(mem.args, "session", None))
-    mark = mem.local.read_json("playbook-begin-%s.json" % session_key(sid), None)
-    if not mark:
+    mark = mem.local.read_json("playbook-begin-%s.json" % session_key(sid), {})
+    if not isinstance(mark.get("at"), str) or not isinstance(mark.get("head", ""), str):
         die("no start marked in this session; `mem playbook begin` marks one", EXIT_INVALID)
     head = mark.get("head") or ""
+    if head and not re.match(r"^[0-9a-f]{7,64}$", head):
+        die("the start mark is damaged; run `mem playbook begin` again", EXIT_INVALID)
     print("Started %s at %s." % (mark["at"][:19].replace("T", " "), head[:10] or "?"))
     log = mg.git("-C", mem.ctx.repo_root, "log", "--format=  %h %s", "%s..HEAD" % head) if head else ""
     print("Commits since:\n%s" % (log.rstrip() or "  none"))
@@ -1592,14 +1775,14 @@ def ask_the_person(mem, a, mode_guess, feature_candidates, no_match, about=None)
                                       for i, m in enumerate(order) if m in info]})
     if feature_candidates is not None:
         opts = [{"label": n["title"] + (" (best match)" if i == 0 else ""),
-                 "description": "; ".join(rs[:2]) or "matched the ask", "args": '--feature "%s"' % n["title"]}
+                 "description": "; ".join(rs[:2]) or "matched the ask", "args": feature_arg(n)}
                 for i, (sc, n, rs) in enumerate(feature_candidates[:3])]
         opts.append({"label": "None of these", "description": "load the big picture only; name the feature afterwards",
                      "args": "--mode orient"})
         questions.append({"id": "feature", "header": "Feature", "question":
                           ("No feature matched this ask. Which part of the product is it about?" if no_match
                            else "Which part of the product is this about?"), "options": opts})
-    rerun = 'mem load "%s" %s' % ((a.ask or "").replace('"', "'"), " ".join("<%s>" % q["id"] for q in questions))
+    rerun = 'mem load "%s" %s' % (shell_safe(a.ask or ""), " ".join("<%s>" % q["id"] for q in questions))
     _qlog(mem, {"k": _ask_key(mem, a.ask), "asked": [q["id"] for q in questions], "guess": mode_guess,
                 "candidates": [n["title"] for _s, n, _r in (feature_candidates or [])[:3]]})
     try:
@@ -1637,9 +1820,8 @@ def cmd_prompt(mem, a):
         sid = mem.local.session_id(getattr(a, "session", None))
         mark = "prompted-%s.json" % session_key(sid)
         led = mem.local.ledger(sid)
-        if mem.local.read_json(mark, None) or (led and led.get("loaded")):
+        if mem.local.read_json(mark, {}).get("at") or (led and led.get("loaded")):
             return EXIT_OK
-        mem.local.write_json(mark, {"at": datetime.now(timezone.utc).isoformat()})
         ns = argparse.Namespace(ask=text[:600], mode=None, feature=None, add=None, touching=None, ref=None,
                                 full=False, print=False, json=False, session=getattr(a, "session", None), hook=True)
         buf = io.StringIO()
@@ -1649,25 +1831,76 @@ def cmd_prompt(mem, a):
         except SystemExit as e:
             rc = e.code if isinstance(e.code, int) else 1
         out = buf.getvalue().strip()
+        if rc in (EXIT_OK, EXIT_AMBIGUOUS) and out:
+            # Marked only once something was delivered: marking first used up the session's one
+            # automatic load when the load then failed (recheck N3).
+            mem.local.write_json(mark, {"at": datetime.now(timezone.utc).isoformat()})
         if rc == EXIT_OK and out:
             print("memory: context for this first message was loaded automatically (Cairn). Post the receipt's "
                   "first line to the person, then read the bundle it names, once.\n" + out)
         elif rc == EXIT_AMBIGUOUS and out:
             print("memory: before starting, Cairn needs one answer from the person. Show them this question with "
                   "its options (they may answer in their own words), then run `mem load` with the chosen args.\n" + out)
-    except Exception:  # a hook must never break the person's prompt
+    except (Exception, SystemExit):  # a hook must never break the person's prompt (die() is SystemExit)
         return EXIT_OK
     return EXIT_OK
+
+
+def _lines(fn):
+    """A local log's lines; a damaged byte or a vanished file never raises (recheck N4)."""
+    try:
+        with open(fn, encoding="utf-8", errors="replace") as fh:
+            return fh.read().splitlines()
+    except OSError:
+        return []
+
+
+EMBEDDED_FLAG = re.compile(r'(?:^|\s)(--(?:mode|feature|touching|ref|add|note|category))(?:\s+|=)("[^"]*"|\'[^\']*\'|[^\s]+)')
+EMBEDDED_BOOL = re.compile(r"(?:^|\s)(--(?:json|print|full))(?=\s|$)")
+
+
+def expand_embedded_flags(argv):
+    """Slash commands hand the whole argument string to mem as ONE quoted ask, so
+    `/cairn-context fix the export --mode debug` searched for the words "--mode debug" (recheck
+    09-F5). For load, gap and remember, flags written inside the text are taken out and passed as
+    flags; everything else stays the ask."""
+    try:
+        i = next(k for k, x in enumerate(argv) if x in ("load", "gap", "remember"))
+    except StopIteration:
+        return argv
+    out, extra = argv[:i + 1], []
+    for x in argv[i + 1:]:
+        if not x.startswith("-") and " --" in " " + x:
+            extra += [t for m in EMBEDDED_FLAG.finditer(x) for t in (m.group(1), m.group(2).strip("\"'"))]
+            extra += [m.group(1) for m in EMBEDDED_BOOL.finditer(x)]
+            x = re.sub(r"\s+", " ", EMBEDDED_BOOL.sub(" ", EMBEDDED_FLAG.sub(" ", x))).strip()
+        out.append(x)
+    return out + extra
+
+
+def shell_safe(text):
+    """Text that is inert inside double quotes in bash, zsh, PowerShell and cmd. The rerun line is
+    copied and run; a `$HOME` or a backtick in the ask was EXPANDED, and `\`id\`` ran (recheck
+    03-F5). Only words and plain punctuation survive; the ask only needs its words."""
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s.,:/+@#=?()'\-]", " ", text or "")).strip()
+
+
+def feature_arg(n):
+    """--feature "<title>" when the title is inert in a shell, else the note's id (always is)."""
+    t = n["title"]
+    return '--feature "%s"' % (t if shell_safe(t) == t else n["id"])
 
 
 def cmd_asks(mem, a):
     """What the questions taught: how often each guess was right, and what people chose instead."""
     asked, answers = 0, []
     for fn in sorted(glob.glob(mem.local.path("logs", "asks-*.jsonl"))):
-        for line in open(fn, encoding="utf-8"):
+        for line in _lines(fn):
             try:
                 rec = json.loads(line)
             except ValueError:
+                continue
+            if not isinstance(rec, dict):
                 continue
             if rec.get("asked"):
                 asked += 1
@@ -1711,12 +1944,12 @@ def cmd_load(mem, a):
         k = _ask_key(mem, a.ask)
         pending = None
         for fn in sorted(glob.glob(mem.local.path("logs", "asks-*.jsonl")))[-2:]:
-            for line in open(fn, encoding="utf-8"):
+            for line in _lines(fn):
                 try:
                     rec = json.loads(line)
                 except ValueError:
                     continue
-                if rec.get("k") == k:
+                if isinstance(rec, dict) and rec.get("k") == k:
                     pending = rec if rec.get("asked") else None
         if pending:
             _qlog(mem, {"k": k, "answer": {"mode": a.mode, "feature": (a.feature or [None])[0]},
@@ -1725,11 +1958,12 @@ def cmd_load(mem, a):
     targets, resolution = [], None
     orient_about = []
     if mode == "orient" and (a.ask or a.touching or a.feature):
-        # "catch me up on Billing": the big picture PLUS that feature's card. Orient
-        # never asks a question, so an unclear target is simply left out.
+        # "catch me up on Billing": the big picture PLUS that feature's card. Orient never asks a
+        # question, so an unclear target is left out, and a TIE is shown whole: "Alpha and Beta"
+        # scoring the same loaded Alpha alone (recheck 03-F3). Cards are cheap.
         ranked, confident = resolve(mem, corpus, a.ask, a.touching or [], a.feature or [])
         if ranked and confident:
-            orient_about = [ranked[0][1]["id"]]
+            orient_about = [r[1]["id"] for r in ranked[:3] if r[0] >= ranked[0][0] * 0.85]
             resolution = ranked[:3]
     if mode not in ("orient",):
         names = a.feature or []
@@ -1738,12 +1972,18 @@ def cmd_load(mem, a):
         missing = [nm for nm, n in zip(names, explicit) if n is None]
         if missing:
             die("no note called %s" % ", ".join(repr(m) for m in missing))
+        tie = len(ranked) > 1 and ranked[1][0] >= ranked[0][0] * 0.85
         if explicit:
             targets = [n["id"] for n in explicit]
-        elif ranked and (confident or mode == "plan"):
+        elif ranked and confident and not tie:
             targets = [ranked[0][1]["id"]]
-            if len(ranked) > 1 and ranked[1][0] >= ranked[0][0] * 0.85:
-                targets.append(ranked[1][1]["id"])
+        elif ranked and (tie or mode == "plan") and mem.proto.get("ask_on_guess", True):
+            # Two features match about equally, or a plan ask names none clearly: ask which one.
+            # Loading both as full targets without a word was the confident-but-wrong case
+            # (recheck 03-F1). A plan with no feature words at all still loads the plan scope.
+            return ask_the_person(mem, a, mode_guess, ranked, False)
+        elif ranked and (confident or mode == "plan"):
+            targets = [ranked[0][1]["id"]] + ([ranked[1][1]["id"]] if tie else [])
         elif mode == "explain" and resolve_decisions(corpus, a.ask)[1]:
             dranked, _ok = resolve_decisions(corpus, a.ask)
             targets = [dranked[0][1]["id"]]
@@ -1766,6 +2006,12 @@ def cmd_load(mem, a):
     items = build_scope(mem, corpus, mode, targets)
     for nid in orient_about:
         items.setdefault(nid, ("card", "about"))
+    for nm in a.add or []:
+        # `--add "Memory Sync" --full` with no ask loaded Core alone: orient never looked at the
+        # added notes (recheck 09-F2). An added note is always loaded in full.
+        n = corpus.find(nm)
+        if n and (n["id"] not in items or DEPTH_RANK[items[n["id"]][0]] < DEPTH_RANK["full"]):
+            items[n["id"]] = ("full", "added")
 
     prefs = mem.local.prefs()
     for p in prefs.get("pins", []):
@@ -1808,7 +2054,7 @@ def _load_locked(mem, a, corpus, ref, who, mode, why_mode, targets, resolution, 
             repeated.append("%s (turn %d)" % (n["title"], prev["turn"]))
             continue
         cache_file = mem.local.path("cache", "%s-%s.md" % (n["hash"][:32], depth))
-        block = cache_read(cache_file, n["hash"], depth)
+        block = cache_read(cache_file, n["hash"], depth, mem.local)
         if block is not None:
             from_cache += 1
         else:
@@ -1818,13 +2064,13 @@ def _load_locked(mem, a, corpus, ref, who, mode, why_mode, targets, resolution, 
             except OSError:
                 pass  # a cache is an optimisation; the load goes on without it
         if nid == "CORE":
-            block += "\n" + feature_map(corpus) + "\n"
+            block += "\n" + feature_map(corpus, targets) + "\n"
         blocks.append((role, block))
         led["loaded"][nid] = {"hash": n["hash"], "depth": depth, "turn": led["turn"], "evicted": False,
                               "path": n["path"], "contract": n["contract_hash"]}
     if "CORE" not in corpus.notes and mode != "plan":
         blocks.insert(0, ("core", "## Core\n\n_There is no CORE.md. Run `mem core init` - without it an "
-                                  "agent starts every task without the big picture._\n\n" + feature_map(corpus)))
+                                  "agent starts every task without the big picture._\n\n" + feature_map(corpus, targets)))
 
     body = "".join(b for _r, b in blocks)
     est = mg.estimate_tokens(body)
@@ -1913,7 +2159,14 @@ def cmd_resolve(mem, a):
     return EXIT_OK if confident else EXIT_AMBIGUOUS
 
 
+def acting_line(mem):
+    w = mem.acting()
+    who = "agent (driven by %s)" % w["handle"] if w["kind"] == "agent" else "%s (%s)" % (w["handle"], w["role"])
+    return "acting as %s; may write up to %s" % (who, w["cap"])
+
+
 def cmd_context(mem, a):
+    print("mem: " + acting_line(mem))   # who is writing, and how high, belongs next to what is loaded (09-F7)
     led = mem.local.ledger(mem.local.session_id(a.session))
     if not led or not led.get("last_receipt"):
         print("mem: nothing loaded in this session yet. Start with: mem load \"<the ask>\"")
@@ -2102,12 +2355,14 @@ def _idf(corpus):
     return corpus._idf_cache
 
 
-def recall(mem, corpus, query, limit=15, ideas=False):
+def recall(mem, corpus, query, limit=15, ideas=False, personal=True):
     q = set(words(query))
     idf, idf_unseen = _idf(corpus)
     weight = lambda ws: sum(idf.get(w, idf_unseen) for w in ws)
     q_weight = max(1e-9, weight(q))
-    prefs = mem.local.prefs()
+    # An eval is a TEAM test: whose pins and mutes it runs under must not change its result
+    # (recheck 03: the same eval failed unpinned and passed after `mem pin`).
+    prefs = mem.local.prefs() if personal else {"pins": [], "mutes": []}
     pins = {p.lstrip("^") for p in prefs.get("pins", [])}
     mutes = {p.lstrip("^") for p in prefs.get("mutes", [])}
     out = []
@@ -2256,6 +2511,15 @@ def cmd_remember(mem, a):
         mg.write_text(path, mg.render(fm or [], insert_claim(body, "- [%s] %s ^%s" % (cat, text, cid))))
         print("mem: remembered ^%s in %s" % (cid, target["path"]))
         return EXIT_OK
+    if cat in ("decision", "adr"):
+        # A decision is canon (decisions/ is L2): written to the journal it passed the guard as an
+        # observation and read as settled (recheck 09-F4). It becomes a proposal for the person
+        # who may decide.
+        rel = proposal(mem, "Decision - %s" % text[:60], "decisions/", "[decision] %s" % text,
+                       "Raised by %s. Promote it as an ADR under decisions/." % mem.acting()["handle"],
+                       kind="claim", payload="- [decision] %s" % text)
+        print("mem: a decision is canon, so this became a proposal: %s" % rel)
+        return EXIT_OK
     rel = "log/journal/%s-%s.md" % (today(), slugify(text))
     if os.path.exists(os.path.join(mem.ctx.notes_root, rel)):
         rel = rel[:-3] + "-%s.md" % os.urandom(2).hex()
@@ -2295,6 +2559,12 @@ def cmd_pin(mem, a, which, add):
     key = "pins" if which == "pin" else "mutes"
     items = set(prefs.get(key, []))
     target = a.target.strip()
+    if not target:
+        die("name what to %s: a note title or path, or a claim ^id" % which, EXIT_INVALID)
+    if add:
+        corpus, _ = mem.corpus(trial=None)
+        if not corpus.find(target):
+            die("no note or claim %r to %s" % (target, which), EXIT_INVALID)
     (items.add if add else items.discard)(target)
     prefs[key] = sorted(items)
     mem.local.write_json("prefs.json", prefs)
@@ -2308,19 +2578,30 @@ def cmd_pin(mem, a, which, add):
 def cmd_why(mem, a):
     corpus, _ = mem.corpus(trial=None)
     cid = a.id.lstrip("^")
+    if not cid or not re.match(r"^[0-9a-f]{6}$", cid):
+        die("a claim id is ^ plus six lower-case hex digits, e.g. ^be2885 (got %r)" % a.id, EXIT_INVALID)
     hit = corpus.claims.get(cid)
     first = mg.git("-C", mem.ctx.repo_root, "log", "--reverse", "-S", "^" + cid,
                    "--format=%h %ad %an: %s", "--date=short").splitlines()
     if not hit:
-        retired = [n for n in corpus.notes.values() if re.search(r"\^%s\b" % cid, n["body"])]
+        # Retired means a claim line under ## Retired. A mere mention (an eval's `includes ^id`)
+        # is a citation of something that no longer exists, and was once reported as "retired"
+        # (recheck 02-F4).
+        retired = [n for n in corpus.notes.values()
+                   if any(c[3] == cid and c[4] == "retired" for c in mg.parse_claims(n["body"]))]
+        cited = [n["path"] for n in corpus.notes.values() if re.search(r"\^%s\b" % cid, n["body"])]
         if retired:
             print("^%s is retired in %s" % (cid, retired[0]["path"]))
-        elif first:
+            return EXIT_OK
+        if cited:
+            print("^%s no longer exists, but %s still cite it: update or retire those references" % (cid, ", ".join(cited[:5])))
+        if first:
             print("^%s no longer exists. History:" % cid)
             for ln in first[-5:]:
                 print("  " + ln)
-        else:
+        elif not cited:
             print("mem: no claim ^%s anywhere in this memory or its history" % cid)
+            return EXIT_FAIL
         return EXIT_OK
     nid, c = hit
     n = corpus.notes[nid]
@@ -2538,19 +2819,44 @@ def cmd_try(mem, a):
     if len(ops) != len(changes):
         die('could not read every --change. Forms: add to "Note title": [fact] text · '
             'replace ^abc123 with: [decision] text · retire ^abc123')
+    who = mem.acting()
+
+    def visible(n):
+        # A restricted note the person may not read is reported exactly like a missing one, or
+        # the difference in the answer says it exists (recheck 05-F5).
+        return n is not None and (n["confidentiality"] != "restricted" or who["restricted_read"])
+
     touched = set()
     targets = set()
     for op in ops:
         if op["op"] == "add":
+            same = [x for x in corpus.notes.values() if x["title"].lower() == op["target"].strip().lower() and visible(x)]
+            if len(same) > 1:
+                die("%d notes are titled %r (%s): name one by its path" % (
+                    len(same), op["target"], ", ".join(x["path"] for x in same)), EXIT_INVALID)   # 05-F4
             n = corpus.find(op["target"])
-            if not n:
-                die("no note %r to add to" % op["target"])
+            if not visible(n):
+                die("no note %r you can read to add to" % op["target"], EXIT_INVALID)
             targets.add(n["title"])
         else:
-            if op["id"] not in corpus.claims:
-                die("no claim ^%s" % op["id"])
+            hit = corpus.claims.get(op["id"])
+            if not hit or not visible(corpus.notes[hit[0]]):
+                die("no claim ^%s you can read" % op["id"], EXIT_INVALID)
             touched.add(op["id"])
-            targets.add(corpus.notes[corpus.claims[op["id"]][0]]["title"])
+            targets.add(corpus.notes[hit[0]]["title"])
+    people = [p_.strip() for p_ in (a.people or []) if p_.strip()]
+    known = {h for h in mem.ctx.policy.get("people", {}) if not h.startswith(("$", "__"))}
+    bad = [p_ for p_ in people if p_ not in known]
+    if bad or len(people) != len(a.people or []):
+        # `--for Ana`, `ghost` and "" were all accepted, and the trial then applied to nobody (05-F6).
+        die("--for takes handles from governance/roles.json exactly (%s); not: %s"
+            % (", ".join(sorted(known)) or "none registered", ", ".join(repr(x) for x in bad) or "an empty name"),
+            EXIT_INVALID)
+    for t in live_trials(corpus):
+        both = set(people) & set(t["for"])
+        if both and not t["expired"]:
+            die("%s already %s trial %s; a person is in one canary at a time, so results stay readable"
+                % (", ".join(sorted(both)), "has" if len(both) == 1 else "have", t["id"].split("/")[-1]), EXIT_INVALID)
     for t in live_trials(corpus):
         other = {o.get("id") for o in trial_changes(t) if o.get("id")}
         if touched & other:
@@ -2560,7 +2866,7 @@ def cmd_try(mem, a):
     expires = (TODAY + timedelta(days=a.days)).isoformat()
     mem.write_note(rel, TRIAL_TEMPLATE.format(
         slug=slug, hypothesis=re.sub(r"\s+", " ", a.hypothesis).strip().replace(":", " -"),
-        owner=mem.acting()["handle"], people=", ".join(a.people or []), expires=expires,
+        owner=who["handle"], people=", ".join(people), expires=expires,
         evals=", ".join(a.evals or []), date=today(),
         changes="\n".join(changes) or "<!-- add lines: add to \"Note\": [fact] text · replace ^id with: [cat] text · retire ^id -->",
         relations="\n".join(rels)))
@@ -2624,8 +2930,25 @@ def cmd_keep(mem, a):
             die("change %s no longer applies - the note or claim is gone" % op)
         allowed, need, have = mem.can_write(n["path"])
         if not allowed:
-            die("keeping this trial changes %s (%s); you write %s. Someone with that role runs mem keep %s"
-                % (n["title"], need, have, a.slug), EXIT_DENIED)
+            # The way above your level is a proposal, for agents especially (recheck 05-F2, 11-F4):
+            # the refusal used to be the end of it, and the result of the trial was lost.
+            rel = "log/proposals/PROPOSAL - keep trial %s.md" % a.slug
+            if not os.path.exists(os.path.join(mem.ctx.notes_root, rel)):
+                lines = ["- [proposal] Keep trial %s: %s" % (a.slug, re.sub(r"\s+", " ", t["hypothesis"] or "").strip())]
+                for o in ops:
+                    lines.append("- [change] %s" % (
+                        'add to "%s": [%s] %s' % (o["target"], o["category"], o["text"]) if o["op"] == "add" else
+                        "replace ^%s with: [%s] %s" % (o["id"], o["category"], o["text"]) if o["op"] == "replace" else
+                        "retire ^%s" % o["id"]))
+                if a.result:
+                    lines.append("- [evidence] %s" % re.sub(r"\s+", " ", a.result).strip())
+                mem.write_note(rel, new_note_text("PROPOSAL - keep trial %s" % a.slug, "proposal", ["proposal", "trial"],
+                                                  "Keeping this trial changes %s, which is %s; the proposer writes %s. "
+                                                  "Whoever may write %s promotes it with `mem keep %s`." % (n["title"], need, have, need, a.slug),
+                                                  lines, ["- relates_to [[Trial %s]]" % a.slug]))
+            print("mem: keeping trial %s changes %s (%s); you write %s. Wrote %s for someone who may write %s: "
+                  "they run `mem keep %s`." % (a.slug, n["title"], need, have, rel, need, a.slug))
+            return EXIT_OK
     for op in ops:
         if op["op"] == "add":
             n = corpus.find(op["target"])
@@ -2677,12 +3000,12 @@ def cmd_expire(mem, a):
 # Ids in an eval go in parentheses - `includes (^a ^b)` - so the line never ENDS with a reference,
 # which would otherwise be read as the eval's own claim id.
 EVAL_RECALL = re.compile(r'^recall\s+"([^"]+)"\s+includes\s+\(?((?:\^[0-9a-f]{6}\s*)+)\)?\s*'
-                         r'(?:excludes\s+\(?((?:\^[0-9a-f]{6}\s*)+)\)?\s*)?(?:top\s+(\d+))?', re.I)
-EVAL_RESOLVE = re.compile(r'^resolve\s+"([^"]+)"(?:\s+touching\s+"([^"]+)")?\s+feature\s+"([^"]+)"(?:\s+mode\s+(\w+))?', re.I)
+                         r'(?:excludes\s+\(?((?:\^[0-9a-f]{6}\s*)+)\)?\s*)?(?:top\s+(\d+))?\s*$', re.I)
+EVAL_RESOLVE = re.compile(r'^resolve\s+"([^"]+)"(?:\s+touching\s+"([^"]+)")?\s+feature\s+"([^"]+)"(?:\s+mode\s+(\w+))?\s*$', re.I)
 
 
 def run_evals(mem, corpus, files=None):
-    results = []
+    results, seen = [], set()
     for n in corpus.notes.values():
         if not n["path"].startswith("evals/"):
             continue
@@ -2692,13 +3015,16 @@ def run_evals(mem, corpus, files=None):
             if c["category"] != "eval" or c["retired"]:
                 continue
             spec = re.sub(r"\s+", " ", c["text"]).strip()
+            if spec.lower() in seen:
+                continue   # the same test twice counts once (recheck 05-F8)
+            seen.add(spec.lower())
             m = EVAL_RECALL.match(spec)
             if m:
                 q = m.group(1)
                 inc = re.findall(r"[0-9a-f]{6}", m.group(2))
                 exc = re.findall(r"[0-9a-f]{6}", m.group(3) or "")
                 top = int(m.group(4) or 15)
-                got = [h[1] for h in recall(mem, corpus, q, top)]
+                got = [h[1] for h in recall(mem, corpus, q, top, personal=False)]
                 miss = [x for x in inc if x not in got]
                 bad = [x for x in exc if x in got]
                 results.append((n["title"], spec, not miss and not bad,
@@ -2721,29 +3047,48 @@ def run_evals(mem, corpus, files=None):
 
 
 def cmd_eval(mem, a):
-    files = [a.file] if a.file else None
+    files = None
     base, _ = mem.corpus(trial=None)
+    if a.file:
+        n = base.find(a.file) or base.find(a.file.replace("\\", "/"))
+        if not n or not n["path"].startswith("evals/"):
+            die("no eval note %r (evals live under evals/)" % a.file, EXIT_INVALID)
+        files = [n["path"]]
     res = run_evals(mem, base, files)
     if not res:
+        # A check that ran nothing did not pass (recheck 03).
         print("mem: no evals found. Add `- [eval] recall \"<question>\" includes ^id` lines under evals/.")
-        return EXIT_OK
+        return EXIT_FAIL
     trial_res = None
     if a.trial:
         tc, _ = mem.corpus("trial/" + a.trial)
-        trial_res = run_evals(mem, tc, files)
+        trial_res = {spec.lower(): (okk, detail) for _src, spec, okk, detail in run_evals(mem, tc, files)}
     passed = sum(1 for r in res if r[2])
     print("%d/%d evals pass on main" % (passed, len(res)))
-    for i, (src, spec, okk, detail) in enumerate(res):
+    regressions = 0
+    for (src, spec, okk, detail) in res:
         line = "  %s %s%s" % ("PASS" if okk else "FAIL", spec[:96], ("   <- " + detail) if detail else "")
-        if trial_res:
-            t_ok = trial_res[i][2]
-            line += "   | trial: %s%s" % ("PASS" if t_ok else "FAIL",
-                                          "  (CHANGED)" if t_ok != okk else "")
+        if trial_res is not None:
+            t = trial_res.get(spec.lower())
+            if t is None:
+                line += "   | trial: REMOVED"   # a trial that retires a test does not pass it (05-F1)
+                regressions += 1 if okk else 0
+            else:
+                line += "   | trial: %s%s" % ("PASS" if t[0] else "FAIL", "  (CHANGED)" if t[0] != okk else "")
+                regressions += 1 if okk and not t[0] else 0
         print(line)
-    if trial_res:
-        tp = sum(1 for r in trial_res if r[2])
-        print("trial %s: %d/%d (%+d vs main)" % (a.trial, tp, len(trial_res), tp - passed))
-        return EXIT_OK if tp >= passed else EXIT_FAIL
+    if trial_res is not None:
+        main_specs = {r[1].lower() for r in res}
+        added = {k: v for k, v in trial_res.items() if k not in main_specs}
+        for k, (okk, detail) in added.items():
+            print("  trial only: %s %s%s" % ("PASS" if okk else "FAIL", k[:96], ("   <- " + detail) if detail else ""))
+        failing_new = sum(1 for okk, _d in added.values() if not okk)
+        tp = sum(1 for okk, _d in trial_res.values() if okk)
+        print("trial %s: %d/%d pass; %d regression(s) against main, %d failing new eval(s)"
+              % (a.trial, tp, len(trial_res), regressions, failing_new))
+        # Counts hid a trial that ADDED a failing eval ("5/6, +0 vs main", exit 0): a trial passes
+        # only when nothing that passed on main fails and every eval it brings passes.
+        return EXIT_OK if regressions == 0 and failing_new == 0 else EXIT_FAIL
     return EXIT_OK if passed == len(res) else EXIT_FAIL
 
 
@@ -2777,6 +3122,7 @@ def cmd_diff(mem, a):
 
 def cmd_status(mem, a):
     corpus, _ = mem.corpus(trial=None)
+    print("mem: " + acting_line(mem))
     props = [n for n in corpus.notes.values() if n["path"].startswith("log/proposals/") and (n["status"] or "open") == "open"]
     review = []
     for n in corpus.notes.values():
@@ -2991,7 +3337,7 @@ def main(argv):
     p = sub.add_parser("role"); p.add_argument("handle"); p.add_argument("role")
     p = sub.add_parser("core"); p.add_argument("action", choices=["init"])
 
-    a = ap.parse_args(argv)
+    a = ap.parse_args(expand_embedded_flags(list(argv)))
     if not a.cmd:
         ap.print_help()
         return EXIT_OK
@@ -3008,7 +3354,8 @@ def main(argv):
                 check_session_id(sid)
             except SessionIdError as e:
                 sys.stderr.write("mem: ignoring the hook's session id: %s\n" % e)
-                return EXIT_INVALID
+                # the prompt hook never fails the person's prompt (recheck N3)
+                return EXIT_OK if a.cmd == "prompt" else EXIT_INVALID
         if sid:
             a.session = a.session or sid
             if a.cmd == "session" and not a.id:

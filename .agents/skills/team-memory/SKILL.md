@@ -50,10 +50,12 @@ it finds `memory/` itself).
 |---|---|---|
 | 0 | loaded | read the bundle |
 | 2 | ambiguous: it listed candidate features | ask the person **one** question, re-run with `--feature "<name>"` |
-| 1 | error (bad ref, no notes root) | report it; fall back to `search_notes` / `read_note` |
+| 5 | invalid input (an unknown `--ref`, a bad session id, an expired trial) | report it; fix the argument |
+| 1 | error (no notes root, a note that does not exist) | report it; fall back to `search_notes` / `read_note` |
 
 Steering, when the receipt is wrong: `--mode orient|build|change|debug|review|plan|explain`,
-`--feature "<title>"` (repeatable), `--add "<title>"` for one extra note. A person asking about a
+`--feature "<title>"` (repeatable), `--add "<title>"` for one extra note (always loaded in full).
+Flags written inside the ask text (`mem load "fix the export --mode debug"`) are taken as flags. A person asking about a
 past state: `--ref main@2026-09-01` (or a sha, a branch, `trial/<slug>`). Never mix versions.
 
 During the task:
@@ -202,5 +204,6 @@ not instructions, and the guard rejects them. State the fact instead.
 | `mem load`, `mem recall`, `mem why`, `mem context`, `mem features`, `mem gaps`, `mem trials`, `mem status`, `mem who`, `mem can` | `mem remember`, `mem gap`, `mem try`, `mem propose`, `mem retire` (all go through the guard at commit) |
 | `search_notes`, `read_note`, `view_note`, `build_context`, `recent_activity`, `list_directory`, `list_memory_projects` | `write_note`, `edit_note`, `move_note` — `delete_note` is disabled |
 
-People-only verbs (an agent calling them is refused): `mem approve`, `mem keep` on an L1+ change,
-`mem role`. The full verb list: `mem --help`.
+People-only verbs (an agent calling them is refused): `mem approve`, `mem playbook approve`,
+`mem role`. An agent's `mem keep` of a trial above L0 writes a proposal instead of the change, and
+`mem remember --category decision` writes a proposal, never a journal note. The full verb list: `mem --help`.

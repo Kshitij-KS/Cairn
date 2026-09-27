@@ -18,9 +18,9 @@ Save one with `/playbook-save` after finishing a task; find one with `/playbook-
 replay one with `/playbook-run <ID>`. Without slash commands: `mem playbook save|find|run`.
 
 ## Observations
-- [rule] Playbooks are L0: anyone saves one and logs their own runs; trust is earned, see ADR-005
-- [rule] A run log is append-only and each line names the person who did the run
-- [rule] Steps are marked [check], [local] or [external]; an unmarked step is treated as [external]
+- [rule] Playbooks are L0: anyone saves one and logs their own runs; trust is earned, see ADR-005 ^0530da
+- [rule] A run log is append-only and each line names the person who did the run ^d3357e
+- [rule] Steps are marked [check], [local] or [external]; an unmarked step is treated as [external] ^e6b766
 
 ## Relations
 - relates_to [[ADR-005 Playbooks]]
