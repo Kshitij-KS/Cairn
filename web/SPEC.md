@@ -101,33 +101,48 @@ Consequences, taken deliberately:
 
 ## Look
 
-An engraved plate: ink on paper, drawn with real linework. The page follows the system theme
-(light "bone paper" or a dark plate) and remembers a manual choice. `web/style.css` holds the
-tokens and is the source of truth; this table mirrors it.
+An observatory instrument: the memory is a sky you fly into, and the chrome around it is glass and
+hairline, so the map is always the brightest thing on the page. Dark (night) by default when the
+system is dark, with a light (day) theme; the toggle wipes between them in a circle from the button.
 
-- Connections are the substance: they carry weight and taper; dependencies are heavier ink.
-- Depth comes from four discrete paper steps and a hard hairline edge, never from a gradient or a
-  glow.
-- One signal colour. Vermilion means "this is the thing you are looking at" and nothing else.
-- Level colour is a legend: four inks that stay subordinate to the signal.
-- No motion that is not answering something the person just did; `prefers-reduced-motion` removes it.
+- **Light is information.** A note is a lit mark in its level's colour with a soft bloom and a small
+  highlight; a region is a disc lit from its centre, its contents drawn inside it as tissue, its level
+  mix as a gauge on the rim. The ground is a quiet gradient over a faint dot grid (an instrument's
+  graticule, not a starfield).
+- **One signal colour** (orchid) means "this is what you are looking at": the selection, its
+  reticle, the edges it touches (drawn marching), the ripple a click leaves.
+- **Glass** for everything that floats over the map (controls, key, card, hover card, search), with
+  a hairline edge that catches light.
+- **Type.** Instrument Serif for names and headings, Instrument Sans for the interface, IBM Plex
+  Mono for ids, counts and paths. Every label measures 11px (notes) or 14px (regions) on screen.
 
-| Level | Meaning | Light | Dark |
+Motion is physical and always optional. Springs for what you touch (a mark swells under the
+pointer, segmented controls move a thumb, the card and dialogs spring in); a long ease for the
+camera; each level arrives in a staggered wave; the briefing arrives a word at a time; numbers count
+up. One continuous motion is an argument rather than decoration: light runs along every dependency
+from the note relied on to the notes that rely on it, the direction a planning change cascades.
+`prefers-reduced-motion` stops all of it, and the Motion switch does the same on request; the page
+is complete at rest.
+
+| Level | Meaning | Night | Day |
 |---|---|---|---|
-| L0 | observation | `#3A5A86` | `#7FA3D6` |
-| L1 | project planning | `#3F7247` | `#7FB185` |
-| L2 | strategy | `#8A621A` | `#D9A441` |
-| L3 | governance | `#8C3A2C` | `#DC7A63` |
+| L0 | observation | `#6EA8FF` | `#2F6FEB` |
+| L1 | project planning | `#3DDC97` | `#0E9F6E` |
+| L2 | strategy | `#FFB547` | `#C27400` |
+| L3 | governance | `#FF7A6E` | `#D9463B` |
 
-| Role | Light | Dark |
+| Role | Night | Day |
 |---|---|---|
-| ground (`--paper-0`) | `#E7E1D2` | `#14130F` |
-| primary ink | `#181611` | `#F2EEE2` |
-| signal | `#C03A22` | `#E85C3C` |
-| needs re-reading | `#91651C` | `#D9A441` |
+| ground | `#070A12` | `#F4F3EF` |
+| raised surface | `#121A2A` | `#FFFFFF` |
+| primary text | `#EEF1FA` | `#11131F` |
+| secondary text | `#B4BCD3` | `#3D4257` |
+| rule | `#232B40` | `#DCDCE4` |
+| signal | `#D59CFF` | `#8E3BD6` |
+| needs attention | `#F6C453` | `#B7791F` |
 
-Spectral for the wordmark and headings; the system sans for interface text; monospace only for
-commit hashes and file paths.
+Search is also a command bar: `/` or Ctrl/Cmd+K focuses it, arrow keys move through the results,
+Enter opens one, and the matched text is marked.
 
 ## States and accessibility
 

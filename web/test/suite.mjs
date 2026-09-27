@@ -196,6 +196,50 @@ async function run(tag, file) {
   ok("the public file carries no commit messages",
      data.mode !== "public" || data.activity.every((a) => a.message === null));
 
+  if (tag === "template corpus") {
+    // --- the interaction layer -------------------------------------------------
+    const b = doc.querySelector("#briefing");
+    ok("the briefing reads the same after its words are animated in",
+       b.querySelectorAll(".w").length > 3 && !/\s{2,}/.test(b.textContent.trim()) && b.textContent.trim().endsWith("."),
+       b.textContent.trim().slice(0, 80));
+    ok("segmented controls and rail tabs get a sliding thumb",
+       !!doc.querySelector("#seg-arrange .seg-thumb") && !!doc.querySelector(".rail-tabs .tab-thumb"));
+    const search = doc.querySelector("#search");
+    doc.dispatchEvent(new win.KeyboardEvent("keydown", { key: "k", ctrlKey: true, bubbles: true }));
+    ok("Ctrl+K focuses search", doc.activeElement === search);
+    search.value = "e";
+    search.dispatchEvent(new win.Event("input", { bubbles: true }));
+    await sleep(200);
+    const first = doc.querySelector("#results .res.hot");
+    search.dispatchEvent(new win.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    const second = doc.querySelector("#results .res.hot");
+    ok("arrow keys move through the results, and the match is marked",
+       first && second && first !== second && !!doc.querySelector("#results mark"),
+       `${doc.querySelectorAll("#results .res").length} results`);
+    search.dispatchEvent(new win.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    // back to the top, where regions are linked by dependencies
+    for (let i = 0; i < 6 && doc.querySelectorAll("#crumbs .crumb").length > 1; i++) {
+      doc.dispatchEvent(new win.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await sleep(260);
+    }
+    doc.querySelector('#seg-arrange button[data-arrange="area"]').dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
+    await sleep(1000);
+    const feat = [...doc.querySelectorAll("g.cl:not(.leaving)")]
+      .find((g) => (g.querySelector(".cl-name")?.textContent || "") === "Features");
+    if (feat) { feat.dispatchEvent(new win.MouseEvent("click", { bubbles: true })); await sleep(1000); }
+    const deps = doc.querySelectorAll("path.lk.dep").length;
+    const packets = doc.querySelectorAll(".packets .packet");
+    const hrefs = [...packets].map((p) => (p.querySelector("mpath")?.getAttribute("href") || "").slice(1));
+    ok("light runs along each dependency, bound to a real edge",
+       deps > 0 && packets.length === Math.min(deps, 28) && hrefs.every((h) => h && doc.getElementById(h)),
+       `${packets.length} packets for ${deps} dependencies`);
+    const mt = doc.querySelector("#motion-toggle");
+    mt.checked = false; mt.dispatchEvent(new win.Event("change", { bubbles: true }));
+    ok("the Motion switch removes them", doc.querySelectorAll(".packets .packet").length === 0
+       && doc.documentElement.classList.contains("still"));
+    mt.checked = true; mt.dispatchEvent(new win.Event("change", { bubbles: true }));
+  }
+
   win.close();
   return { pass, fail };
 }

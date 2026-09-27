@@ -70,6 +70,7 @@ const src = JSON.parse(fs.readFileSync(FIX("n1020.json"), "utf8"));
   ok("reduced motion still draws the map", live("g.cl").length >= 2, `${live("g.cl").length} groups`);
   ok("the motion switch hides itself when the OS already said no",
      doc.querySelector("#motion-row").hidden === true);
+  ok("with reduced motion no light runs along the edges", doc.querySelectorAll(".packet").length === 0);
   const g = live("g.cl:not(.dim):not(.container)")[0];
   g.dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
   await sleep(120);                                  // no transition to wait for

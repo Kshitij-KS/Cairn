@@ -76,6 +76,67 @@
     `<span class="tick" data-level="${esc(l)}" style="background:${levelColour(l)}"
       title="${esc(l)}, ${esc(levelLabel(l))}"></span>`;
 
+  /* ───────────────────────────── small motions ───────────────────────────── */
+
+  // Numbers count up to their value. The final text is written first, so anything reading the
+  // page (a screen reader, a test, a copy-paste) sees the true number whatever the animation does.
+  function countUp(root) {
+    if (!root || !dur(1)) return;
+    root.querySelectorAll("[data-count]").forEach((el) => {
+      const to = +el.dataset.count;
+      if (!isFinite(to) || to <= 0) return;
+      el.textContent = String(to);
+      const t0 = performance.now(), ms = 900;
+      const step = (now) => {
+        const p = Math.min(1, (now - t0) / ms);
+        const e = 1 - Math.pow(1 - p, 3);
+        el.textContent = String(Math.round(to * e));
+        if (p < 1) requestAnimationFrame(step); else el.textContent = String(to);
+      };
+      requestAnimationFrame(step);
+    });
+  }
+
+  // The briefing arrives a word at a time. Each word is wrapped in place, so the markup and the
+  // text it reads out stay exactly what renderBriefing wrote.
+  function revealWords(root) {
+    if (!root || !dur(1)) return;
+    let i = 0;
+    const walk = (node) => {
+      [...node.childNodes].forEach((ch) => {
+        if (ch.nodeType === 3) {
+          const parts = ch.textContent.split(/(\s+)/);
+          const frag = document.createDocumentFragment();
+          parts.forEach((p) => {
+            if (!p) return;
+            if (/^\s+$/.test(p)) { frag.appendChild(document.createTextNode(p)); return; }
+            const s = document.createElement("span");
+            s.className = "w"; s.style.setProperty("--i", i++); s.textContent = p;
+            frag.appendChild(s);
+          });
+          ch.replaceWith(frag);
+        } else if (ch.nodeType === 1) walk(ch);
+      });
+    };
+    walk(root);
+  }
+
+  // A pill that moves under the active button of a segmented control.
+  function moveThumb(group, activeSel, cls) {
+    if (!group) return;
+    let th = group.querySelector("." + cls);
+    if (!th) {
+      th = document.createElement("span");
+      th.className = cls; th.setAttribute("aria-hidden", "true");
+      group.prepend(th);
+      group.classList.add(cls === "tab-thumb" ? "has-thumb" : "has-thumb");
+    }
+    const b = group.querySelector("button" + activeSel);
+    if (!b) return;
+    th.style.width = b.offsetWidth + "px";
+    th.style.transform = "translateX(" + b.offsetLeft + "px)";
+  }
+
   /* ───────────────────────────── motion budget ───────────────────────────── */
 
   const reduced = () => window.matchMedia
@@ -318,10 +379,11 @@
         : " Nothing has changed since you last looked.";
     } else {
       sentence += ` ${state.data.activity.length} change${
-        state.data.activity.length === 1 ? "" : "s"} are on record.`;
+        state.data.activity.length === 1 ? " is" : "s are"} on record.`;
     }
 
     $("#briefing").innerHTML = sentence;
+    revealWords($("#briefing"));
     $("#since").textContent = state.lastVisit
       ? `Last visit ${ago(state.lastVisit.toISOString())}`
       : "First visit from this browser";
@@ -338,7 +400,8 @@
     $("#stats").innerHTML = [
       [s.notes, "notes"], [s.observations, "facts"], [s.relations, "links"],
       [s.dependencies, "dependencies"], [s.authors, "authors"],
-    ].map(([v, k]) => `<p class="stat"><b>${v}</b><span>${k}</span></p>`).join("");
+    ].map(([v, k]) => `<p class="stat"><b data-count="${v}">${v}</b><span>${k}</span></p>`).join("");
+    countUp($("#stats"));
 
     const at = d.source_commit_at || d.generated_at;
     const stale = at && (Date.now() - new Date(at).getTime()) > 48 * 3600e3;
@@ -407,6 +470,19 @@
       .attr("x", "-70%").attr("y", "-70%").attr("width", "240%").attr("height", "240%");
     bloom.append("feGaussianBlur").attr("stdDeviation", 3.4);
 
+    // a small, bright glow for things made of light (packets, the pulse)
+    const glow = defs.append("filter").attr("id", "glow")
+      .attr("x", "-200%").attr("y", "-200%").attr("width", "500%").attr("height", "500%");
+    glow.append("feGaussianBlur").attr("stdDeviation", 1.6).attr("result", "b");
+    const gm = glow.append("feMerge");
+    gm.append("feMergeNode").attr("in", "b");
+    gm.append("feMergeNode").attr("in", "SourceGraphic");
+
+    // a region is lit from its centre: the fill is a gradient of two paper steps, themed by CSS
+    const disc = defs.append("radialGradient").attr("id", "disc-fill").attr("cx", "50%").attr("cy", "42%").attr("r", "62%");
+    disc.append("stop").attr("offset", "0%").attr("class", "df-a");
+    disc.append("stop").attr("offset", "100%").attr("class", "df-b");
+
     // The plate's own tooth. A real paper grain sits under everything at an opacity you only
     // notice when it is missing; it is what stops large flat fills reading as a screen.
     const grain = defs.append("filter").attr("id", "grain");
@@ -426,6 +502,7 @@
     state.world = world;
     world.append("g").attr("class", "ghosts");     // the level above, kept faintly for orientation
     world.append("g").attr("class", "links");
+    world.append("g").attr("class", "packets").attr("pointer-events", "none");
     world.append("g").attr("class", "pulses");
     world.append("g").attr("class", "clusters");
     world.append("g").attr("class", "notes");
@@ -537,6 +614,15 @@
 
   function render(opts = {}) {
     const view = state.view = computeView();
+    if (state.world && dur(1)) {
+      // re-trigger the arrival wave for this level
+      const w = state.world.node();
+      w.classList.remove("ignite");
+      void w.getBoundingClientRect();
+      w.classList.add("ignite");
+      clearTimeout(state.igniteT);
+      state.igniteT = setTimeout(() => w.classList.remove("ignite"), 1600);
+    }
     const t = (sel) => (dur(1) ? sel.transition().duration(opts.fast ? 240 : 520)
       .ease(d3.easeCubicOut) : sel);
 
@@ -572,13 +658,16 @@
     }
 
     const enter = sel.enter().append("g").attr("class", "cl");
-    enter.append("circle").attr("class", "cl-halo");
-    enter.append("circle").attr("class", "cl-disc");
-    enter.append("g").attr("class", "cl-tissue").attr("aria-hidden", "true");
-    enter.append("circle").attr("class", "cl-edge").attr("pointer-events", "none");
-    enter.append("circle").attr("class", "cl-tick").attr("fill", "none")
+    // Everything drawn goes in a body that can spring on hover and ignite on arrival; the text
+    // stays outside it, so a name is never scaled.
+    const body = enter.append("g").attr("class", "cl-body");
+    body.append("circle").attr("class", "cl-halo");
+    body.append("circle").attr("class", "cl-disc");
+    body.append("g").attr("class", "cl-tissue").attr("aria-hidden", "true");
+    body.append("circle").attr("class", "cl-edge").attr("pointer-events", "none");
+    body.append("circle").attr("class", "cl-tick").attr("fill", "none")
       .attr("pointer-events", "none");
-    enter.append("circle").attr("class", "cl-flag");
+    body.append("circle").attr("class", "cl-flag");
     // Text goes in a counter-scaled group. SVG scales EVERYTHING under a transform, text
     // included, so a label drawn at 14 units renders at 14k pixels: at the framing zoom the
     // names came out three times their size and swallowed the map. Anything meant to be read
@@ -595,6 +684,7 @@
     sel.interrupt().classed("leaving", false)
       .attr("aria-hidden", null).style("pointer-events", null).style("opacity", null);
 
+    enter.each(function (d, i) { this.style.setProperty("--i", i); });
     const all = enter.merge(sel);
     all.attr("data-id", (d) => d.c.id)
       .classed("dim", (d) => !!d.dim)
@@ -607,9 +697,8 @@
 
     all.style("opacity", (d) => (d.dim ? 0.20 : d.container ? 0.5 : 1));
 
-    all.select(".cl-halo").attr("r", (d) => d.w.r).attr("fill", "none")
-      .attr("stroke", (d) => dominant(d.c)).attr("stroke-width", 2.5)
-      .attr("stroke-opacity", 0.16);
+    all.select(".cl-halo").attr("r", (d) => d.w.r).attr("fill", (d) => dominant(d.c))
+      .attr("filter", "url(#bloom)");
     all.select(".cl-disc").attr("r", (d) => d.w.r)
       .attr("stroke", (d) => dominant(d.c));
     // draw the contents as tissue, at their real relative positions
@@ -646,6 +735,7 @@
     all.on("click", (ev, d) => {
         ev.stopPropagation();
         if (d.container) { back(); return; }
+        if (!d.dim) ripple(d.w.x, d.w.y, d.w.r);
         d.dim ? up(d.c) : enter_(d.c);
       })
       .on("keydown", (ev, d) => {
@@ -681,10 +771,13 @@
 
     const enter = sel.enter().append("g").attr("class", "nd").style("opacity", 0);
     enter.append("circle").attr("class", "nd-flag");
-    enter.append("circle").attr("class", "nd-bloom");
-    enter.append("path").attr("class", "proc").attr("pointer-events", "none");
-    enter.append("circle").attr("class", "nd-core");
-    enter.append("circle").attr("class", "nd-rim").attr("pointer-events", "none");
+    // the body springs when pointed at; the label lives outside it and never scales
+    const nb = enter.append("g").attr("class", "nd-body");
+    nb.append("circle").attr("class", "nd-bloom");
+    nb.append("path").attr("class", "proc").attr("pointer-events", "none");
+    nb.append("circle").attr("class", "nd-core");
+    nb.append("circle").attr("class", "nd-shine").attr("pointer-events", "none");
+    nb.append("circle").attr("class", "nd-rim").attr("pointer-events", "none");
     enter.append("circle").attr("class", "nd-breath");
     enter.append("path").attr("class", "reticle");
     enter.append("g").attr("class", "lbl")
@@ -720,6 +813,9 @@
     }
 
     all.select(".nd-core").attr("r", (d) => d.r).attr("fill", (d) => nodeColour(d.n));
+    // a specular highlight, so a mark reads as an object lit from above-left, not a flat dot
+    all.select(".nd-shine").attr("r", (d) => d.r * 0.26)
+      .attr("cx", (d) => -d.r * 0.36).attr("cy", (d) => -d.r * 0.4);
     all.select(".nd-rim").attr("r", (d) => d.r + 2.5);
     // Processes: short tapered strokes leaving the cell for each relation whose other end is not
     // on this plate. A cell drawn with none of its connections reads as isolated, which is
@@ -777,6 +873,7 @@
     const data = view.depth === 0
       ? view.edges.map((e) => ({ ...e, key: e.id }))
       : view.edges.map((e) => ({ a: { x: e.a.x, y: e.a.y }, b: { x: e.b.x, y: e.b.y },
+                                 sid: e.a.n && e.a.n.id, tid: e.b.n && e.b.n.id,
                                  dependency: e.dependency, weight: 1, key: e.id }));
 
     const sel = state.world.select(".links").selectAll("path.lk").data(data, (d) => d.key);
@@ -784,6 +881,8 @@
     const enter = sel.enter().append("path").attr("class", "lk");
     const all = enter.merge(sel)
       .classed("dep", (d) => !!d.dependency)
+      .classed("hot", false).classed("cold", false)
+      .attr("id", (d) => "lk-" + edgeKey(d.key))
       .attr("d", (d) => arc(d.a, d.b, d.dependency))
       .attr("stroke-width", (d) => Math.min(4.5, 0.7 + Math.log2(1 + (d.weight || 1)) * 0.9));
 
@@ -799,7 +898,45 @@
           .on("end", function () { d3.select(this).attr("stroke-dasharray", null); });
       });
     }
+    drawPackets(data);
     return all;
+  }
+
+  // Keys contain note ids, which can hold any character; an element id may not.
+  const edgeKey = (k) => {
+    let h = 2166136261;
+    for (let i = 0; i < k.length; i++) { h ^= k.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return (h >>> 0).toString(36);
+  };
+
+  // Light running along each dependency, from the note relied on to the note that relies on it:
+  // the direction a planning change cascades. Declarative (SVG animateMotion), so it costs no
+  // script per frame, and it is never drawn when motion is off.
+  function drawPackets(data) {
+    const g = state.world.select(".packets");
+    g.selectAll("*").remove();
+    if (!ambientOn()) return;
+    const deps = data.filter((d) => d.dependency).slice(0, 28);
+    deps.forEach((d, i) => {
+      const len = Math.hypot(d.b.x - d.a.x, d.b.y - d.a.y);
+      const secs = Math.max(1.8, Math.min(5.5, len / 60)) + (i % 4) * 0.25;
+      const k = state.cam.k || 1;
+      const c = g.append("circle").attr("class", "packet").attr("r", Math.max(0.6, 2.1 / k));
+      const m = c.append("animateMotion").attr("dur", secs.toFixed(2) + "s")
+        .attr("repeatCount", "indefinite").attr("begin", (-(i * 0.37) % secs).toFixed(2) + "s")
+        .attr("keyPoints", "1;0").attr("keyTimes", "0;1").attr("calcMode", "linear");
+      m.append("mpath").attr("href", "#lk-" + edgeKey(d.key));
+    });
+  }
+
+  // A click leaves a ring that spreads from where it landed.
+  function ripple(x, y, r) {
+    if (!dur(1)) return;
+    const k = state.cam.k || 1;
+    state.world.select(".pulses").append("circle").attr("class", "ripple")
+      .attr("cx", x).attr("cy", y).attr("r", r * 0.25).attr("stroke-width", 1.6 / k).style("opacity", 0.9)
+      .transition().duration(760).ease(d3.easeCubicOut)
+      .attr("r", r * 1.25).style("opacity", 0).remove();
   }
 
   function arc(a, b, straight) {
@@ -1078,7 +1215,9 @@
   function select(id, fromHash) {
     if (!id) {
       state.selected = null;
-      state.world.select(".notes").selectAll("g.nd").classed("sel", false).classed("faded", false);
+      state.world.select(".notes").selectAll("g.nd").classed("sel", false).classed("faded", false)
+        .classed("near", false);
+      state.world.select(".links").selectAll("path.lk").classed("hot", false).classed("cold", false);
       state.world.selectAll(".guest").remove();
       $("#card").hidden = true;
       $("#detail").innerHTML = `<p class="panel-hint">Select a note on the map to read it.</p>`;
@@ -1119,6 +1258,9 @@
       .classed("faded", (x) => !near.has(x.n.id));
 
     drawGuests(d, n);
+    state.world.select(".links").selectAll("path.lk")
+      .classed("hot", (e) => e.sid === id || e.tid === id)
+      .classed("cold", (e) => e.sid !== id && e.tid !== id);
     if (dur(1)) {
       const g = state.world.select(".pulses");
       const k = state.cam.k || 1;
@@ -1211,13 +1353,14 @@
             ? "The summary line is withheld for " + esc(n.level) + " notes on the published site."
             : "This note has no summary line."}</p>`}
       <p class="card-nums">
-        <b>${n.observations}</b> facts <span class="dot">·</span>
-        <b>${dependents}</b> depend on it <span class="dot">·</span>
-        <b>${dependsOn}</b> it depends on</p>
+        <span><b data-count="${n.observations}">${n.observations}</b>facts</span>
+        <span><b data-count="${dependents}">${dependents}</b>depend on it</span>
+        <span><b data-count="${dependsOn}">${dependsOn}</b>it depends on</span></p>
       <p class="card-more"><button class="link-btn" id="card-detail">Read the full entry</button></p>`;
     card.hidden = false;
     card.dataset.x = d.x; card.dataset.y = d.y; card.dataset.r = d.r;
     positionCard();
+    countUp(card);
     $(".card-x", card).addEventListener("click", () => select(null));
     $("#card-detail").addEventListener("click", () => { showPanel("note"); $("#panel-note").focus(); });
   }
@@ -1364,6 +1507,7 @@
   function showPanel(name) {
     $$(".rail-tabs button").forEach((b) =>
       b.setAttribute("aria-selected", String(b.dataset.panel === name)));
+    moveThumb($(".rail-tabs"), '[aria-selected="true"]', "tab-thumb");
     $$(".panel").forEach((p) => {
       const on = p.id === "panel-" + name;
       p.classList.toggle("on", on);
@@ -1378,8 +1522,9 @@
         `<p class="panel-hint">No commits yet. The first sync will fill this in.</p>`;
       return;
     }
+    $("#feed").classList.add("stagger");
     $("#feed").innerHTML = acts.map((a, i) => `
-      <li data-i="${i}" tabindex="0" aria-current="false" class="${isNew(a.at) ? "new" : ""}">
+      <li data-i="${i}" tabindex="0" aria-current="false" class="${isNew(a.at) ? "new" : ""}" style="--i:${Math.min(i, 14)}">
         <div class="f-top">
           ${tick(a.level)}
           <span class="f-who">${esc(a.author)}${a.actor === "agent"
@@ -1469,8 +1614,14 @@
     const worst = h.issues.filter((i) => i.severity === "major").slice(0, 10);
 
     $("#gaps").innerHTML = `
-      <p class="score-line"><b class="score-num">${h.score}</b><span class="score-of">out of 100</span></p>
-      <div class="score-bar"><i id="score-fill"></i></div>
+      <div class="score">
+        <svg class="score-ring" viewBox="0 0 100 100" aria-hidden="true">
+          <circle class="track" cx="50" cy="50" r="42"/>
+          <circle class="fill" id="score-fill" cx="50" cy="50" r="42"
+                  style="stroke-dasharray:${(2 * Math.PI * 42).toFixed(1)};stroke-dashoffset:${(2 * Math.PI * 42).toFixed(1)}"/>
+        </svg>
+        <p class="score-line"><b class="score-num" data-count="${h.score}">${h.score}</b><span class="score-of">out of 100</span></p>
+      </div>
       <p class="score-verdict">${esc(verdict)} The score falls for unfilled placeholders,
         unreachable notes, notes going stale, and links that do not resolve.</p>
       ${rows || `<p class="settled">No gaps found.</p>`}
@@ -1487,7 +1638,9 @@
         }).join("")}` : ""}`;
 
     requestAnimationFrame(() => {
-      const f = $("#score-fill"); if (f) f.style.width = h.score + "%";
+      const f = $("#score-fill");
+      if (f) f.style.strokeDashoffset = ((2 * Math.PI * 42) * (1 - h.score / 100)).toFixed(1);
+      countUp($("#gaps"));
     });
 
     $$("#gaps .item").forEach((el) => el.addEventListener("click", () => {
@@ -1585,9 +1738,14 @@
       || (n.tags || []).some((t) => t.toLowerCase().includes(term))
       || (n.brief || "").toLowerCase().includes(term)).slice(0, 12);
     box.hidden = false;
+    const mark = (t) => {
+      const i = t.toLowerCase().indexOf(term);
+      return i < 0 ? esc(t) : esc(t.slice(0, i)) + "<mark>" + esc(t.slice(i, i + term.length)) + "</mark>"
+        + esc(t.slice(i + term.length));
+    };
     box.innerHTML = hits.length
-      ? hits.map((n) => `<button class="res" data-id="${esc(n.id)}">
-          ${tick(n.level)}<span class="res-t">${esc(n.title)}</span>
+      ? hits.map((n, i) => `<button class="res${i === 0 ? " hot" : ""}" data-id="${esc(n.id)}" style="--i:${i}">
+          ${tick(n.level)}<span class="res-t">${mark(n.title)}</span>
           <span class="res-p">${esc(n.path)}</span></button>`).join("")
       : `<p class="res-none">Nothing matches "${esc(q)}".</p>`;
     $$("#results .res").forEach((b) => b.addEventListener("click", () => {
@@ -1637,6 +1795,7 @@
   function syncArrangementButtons() {
     $$("#seg-arrange button").forEach((b) =>
       b.setAttribute("aria-pressed", String(b.dataset.arrange === state.arrangement)));
+    moveThumb($("#seg-arrange"), '[aria-pressed="true"]', "seg-thumb");
   }
 
   /* ───────────────────────── wiring ───────────────────────── */
@@ -1645,8 +1804,22 @@
     $$("#seg-arrange button").forEach((b) =>
       b.addEventListener("click", () => setArrangement(b.dataset.arrange)));
 
+    // a soft light follows the pointer over the map
+    const spot = $("#atlas .spot");
+    if (spot) $("#atlas").addEventListener("pointermove", (ev) => {
+      const r = $("#atlas").getBoundingClientRect();
+      spot.style.setProperty("--mx", (ev.clientX - r.left) + "px");
+      spot.style.setProperty("--my", (ev.clientY - r.top) + "px");
+    });
+    requestAnimationFrame(() => {
+      moveThumb($("#seg-arrange"), '[aria-pressed="true"]', "seg-thumb");
+      moveThumb($("#seg-colour"), '[aria-pressed="true"]', "seg-thumb");
+      moveThumb($(".rail-tabs"), '[aria-selected="true"]', "tab-thumb");
+    });
+
     $$("#seg-colour button").forEach((b) => b.addEventListener("click", () => {
       $$("#seg-colour button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      moveThumb($("#seg-colour"), '[aria-pressed="true"]', "seg-thumb");
       state.colourMode = b.dataset.mode;
       paint();
     }));
@@ -1659,6 +1832,8 @@
 
     $("#motion-toggle").addEventListener("change", (e) => {
       state.ambient = e.target.checked;
+      document.documentElement.classList.toggle("still", !state.ambient);
+      if (state.view) drawEdges(state.view, (x) => x);   // packets come and go with motion
       if (!state.ambient) {   // put everything back exactly on its mark
         state.world.select(".notes").selectAll("g.nd")
           .attr("transform", (d) => `translate(${d.x},${d.y}) scale(1)`);
@@ -1683,7 +1858,16 @@
     });
     $("#search").addEventListener("keydown", (e) => {
       if (e.key === "Escape") { e.target.value = ""; runSearch(""); e.target.blur(); }
-      if (e.key === "Enter") { const f = $("#results .res"); if (f) f.click(); }
+      if (e.key === "Enter") { const f = $("#results .res.hot") || $("#results .res"); if (f) f.click(); }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        const items = $$("#results .res");
+        if (!items.length) return;
+        e.preventDefault();
+        let i = items.findIndex((x) => x.classList.contains("hot"));
+        i = (i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+        items.forEach((x, j) => x.classList.toggle("hot", j === i));
+        items[i].scrollIntoView && items[i].scrollIntoView({ block: "nearest" });
+      }
     });
     document.addEventListener("click", (e) => {
       if (!e.target.closest(".search-wrap")) $("#results").hidden = true;
@@ -1702,8 +1886,14 @@
     });
 
     $("#help-btn").addEventListener("click", () => $("#help").showModal());
-    $("#theme-btn").addEventListener("click", () =>
-      setTheme(currentTheme() === "dark" ? "light" : "dark"));
+    $("#theme-btn").addEventListener("click", (ev) => {
+      const next = currentTheme() === "dark" ? "light" : "dark";
+      if (!document.startViewTransition || !dur(1)) { setTheme(next); return; }
+      const r = ev.currentTarget.getBoundingClientRect();
+      document.documentElement.style.setProperty("--vx", (r.left + r.width / 2) + "px");
+      document.documentElement.style.setProperty("--vy", (r.top + r.height / 2) + "px");
+      document.startViewTransition(() => setTheme(next));
+    });
 
     if (window.matchMedia) {
       window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => {
@@ -1721,6 +1911,9 @@
       // the document itself has no `matches`, and calling it there threw and killed every
       // keyboard shortcut on the page.
       const t = e.target;
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+        e.preventDefault(); $("#search").focus(); $("#search").select(); return;
+      }
       if (t && typeof t.matches === "function" && t.matches("input, textarea, select")) return;
       if (e.key === "Escape") back();
       if (e.key === "/") { e.preventDefault(); $("#search").focus(); }
