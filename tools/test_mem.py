@@ -269,6 +269,26 @@ def test_round1_fixes():
     rc, out = run("resolve", "the writer and the header row", "--json")
     ok("an ask with no intent word and no symptom is build, and the reason says it is a guess",
        json.loads(out)["mode"] == "build" and "GUESS" in json.dumps(json.loads(out)), out[:200])
+    # asking instead of guessing: an ask with no intent word and no symptom stops with a question
+    ask = "the writer and its header row"
+    rc, out = run("load", ask, "--json")
+    q = json.loads(out)["ask_the_person"] if rc == 2 else []
+    ok("a guessed mode is a question, not a load (exit 2): best guess first, about the resolved feature",
+       rc == 2 and q and q[0]["id"] == "mode" and q[0]["options"][0]["args"] == "--mode build"
+       and "(best guess)" in q[0]["options"][0]["label"] and "Export" in q[0]["question"]
+       and {o["args"] for o in q[0]["options"]} >= {"--mode debug", "--mode change"}, out[:300])
+    rc, out = run("load", "the header row and the rounding", "--json")
+    qs = {x["id"]: x for x in json.loads(out)["ask_the_person"]} if rc == 2 else {}
+    ok("an unclear feature and a guessed mode are asked together; the feature question offers a way out",
+       set(qs) == {"mode", "feature"} and qs["feature"]["options"][-1]["args"] == "--mode orient", out[:300])
+    rc, out = run("load", ask, "--mode", "debug")
+    rc2, out2 = run("asks")
+    ok("the answer loads, and `mem asks` reports the corrected guess without the ask text",
+       rc == 0 and "debug mode (you chose it)" in out and "guessed build, person chose debug" in out2
+       and not any(ask in open(os.path.join(NOTES, ".memory", "logs", f)).read()
+                   for f in os.listdir(os.path.join(NOTES, ".memory", "logs")) if f.startswith("asks-")), out2[:300])
+    rc, out = run("load", "add a column to the writer")
+    ok("negative: an ask with an intent word never asks", rc == 0 and "question" not in out.lower()[:200], out[:160])
     # a team's own symptom words come from roles.json protocol.extra_symptoms (read from HEAD)
     ask = "the spreadsheet preview is too quiet"
     rc, out = run("resolve", ask, "--json")
@@ -584,8 +604,9 @@ def test_write_verbs():
     rc, out = run("recall", "writer memory reports")
     ok("a muted note stays out of recall", "runs out of memory" not in out)
     run("unmute", "Writer failed on large reports")
-    logs = open(os.path.join(NOTES, ".memory", "logs", os.listdir(os.path.join(NOTES, ".memory", "logs"))[0])).read()
-    ok("recall logs never contain the query text", "4K output" not in logs and "\"q\"" in logs)
+    logdir = os.path.join(NOTES, ".memory", "logs")
+    logs = "".join(open(os.path.join(logdir, f)).read() for f in sorted(os.listdir(logdir)) if f.startswith("recall-"))
+    ok("recall logs never contain the query text", "million rows" not in logs and "\"q\"" in logs)
 
     rc, out = run("role", "ana", "steward", env=AGENT)
     ok("negative: an agent cannot change roles", rc == 4)
@@ -702,7 +723,7 @@ def main():
     return 0 if passed == len(RESULTS) == EXPECTED else 1
 
 
-EXPECTED = 102
+EXPECTED = 106
 
 
 if __name__ == "__main__":

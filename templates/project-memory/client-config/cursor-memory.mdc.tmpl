@@ -14,7 +14,8 @@ Two Basic Memory projects serve this repo: **`__PROJECT_NAME__`** (`memory/`, pr
    `uv run -q --script memory/scripts/mem.py load "<the ask>" --touching <file>...` from the repo
    root. It loads this project's `CORE.md` and feature map, resolves the feature, picks a mode and
    loads the neighbourhood by direction. Read the bundle file it names; post the receipt's first
-   line; exit 2 = ask the person which feature, re-run with `--feature`. Company-wide canon is in
+   line; exit 2 = `mem` is asking which kind of task and/or which feature: show its question with its
+   options (the person may answer in their own words) and rerun with the chosen args. Company-wide canon is in
    `cairn` (run the same command there, or `search_notes` with `search_all_projects: true`).
    If `mem.py` cannot run: `search_notes` + `read_note` on `CORE.md`, `features/`, `context/`,
    accepted ADRs, and post `Memory: read <n> notes — <fact>; <fact>; <ADR or "no ADR">.`

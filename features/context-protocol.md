@@ -23,7 +23,7 @@ Context Protocol is the reader: `mem load` gives an agent the core, resolves whi
 - [fact] The feature map is computed on every load, not stored, so it cannot drift from features/ ^76faba
 - [fact] Explain asks that name no feature resolve to a decision; orient adds a confidently resolved feature's card; a symptom with no intent word means debug ^a1d26e
 - [fact] Recall relevance is IDF-weighted over claim texts ^b8fa22
-- [fact] An ask with no intent word and no symptom is build, and the receipt marks it A GUESS ^16bd4f
+- [fact] When the kind of task or the feature is unclear, mem load asks the person with ranked options instead of guessing; mem asks reports how often the guesses were corrected ^16bd4f
 
 ## Relations
 - depends_on [[Memory Guard]]

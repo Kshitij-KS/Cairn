@@ -29,6 +29,12 @@ Everything that runs on a laptop is a guard-rail for honest agents. On GitHub, `
 the Windows PowerShell sync) has passed on the template's pushes; `memory-gate` has not yet judged a
 real pull request. Section 11 says how each figure was measured; section 12 lists what was not.
 
+**Two supported setups.** *Simple* (the recommended start): `main` unprotected, `enforcement.mode`
+`direct`, notes reach `main` at the end of every turn, and the guard on each laptop is the only check.
+*Protected*: a ruleset on `main`, `mode` `pr`, notes travel through one pull request per person and
+the base revision's gate judges them. README 2.5 states the trade in the user's terms: Simple stops
+honest mistakes, not a determined person, and that includes the hooks every teammate's machine runs.
+
 **Containment in force:** nothing auto-merges until an owner adds a level to
 `enforcement.auto_merge_levels`; the public atlas is published by hand only. Agents' automatic
 `post` on Windows is on (it was paused until the PowerShell chain passed on Windows; CI now runs it
@@ -360,6 +366,18 @@ from `roles.json`) means debug; otherwise `plan` for a person whose
 
 Hop counts and windows are `roles.json` `protocol` values. `relates_to` is never followed.
 
+**Asking instead of guessing.** When the mode is a guess (no intent word, no symptom, no `--mode`,
+no `--feature`) or the feature is unclear, `mem load` loads nothing and exits 2 with one prompt of at
+most two questions, `mode` and `feature`, each with ranked options (best guess first) carrying the
+args to rerun with; `--json` prints them as `{"ask_the_person": [{id, header, question, options:
+[{label, description, args}]}], "rerun"}` so Claude Code can show them with AskUserQuestion. The
+feature question always offers "None of these" (`--mode orient`). The question and the later answer
+are logged locally in `.memory/logs/asks-YYYY-MM.jsonl` under a salted hash of the ask, never its
+text; `mem asks` reports how often each guess was accepted or corrected and names the fix
+(`protocol.extra_symptoms`, feature `aliases:`). `protocol.ask_on_guess: false` restores the
+guess-and-flag behaviour. **[verified: tools/test_mem.py, including that the log holds no ask
+text]**
+
 #### 4.2.4 Recall ranking
 
 `score = relevance x authority x freshness x state` (+100 if pinned). Relevance is the share of the
@@ -654,7 +672,7 @@ Each with where it is enforced and the test that shows it failing when broken.
 | `tools/test_guard.py` | 22 | claim ids and carry-forward, trailing references, features and write-back, levels for new folders, agent-marker default, project tier from repo root |
 | `tools/test_security.py` | 29 | the audit's access/attribution BLOCKERs as regressions: policy self-demotion, empty policy, the floor, renames, case and Unicode tricks (range mode too), forged and blank authors, derived bytes, public paths, CODEOWNERS (catch-all and level-aware), open-under-restricted; the actor override inside an agent runtime; injection phrasings, with a benign negative. Never imports the guard under test (a guard that exits 0 at import once ended a run green) |
 | `tools/test_gate.py` | 6 | the memory-gate job in its two-checkout shape: the 10-F1 attack PR, a quiet policy demotion, a demoting rename, an honest L0 note |
-| `tools/test_mem.py` | 102 | resolution and modes (including CI and AI-quality symptoms, the flagged build guess, team `extra_symptoms`), directional scope, ledger, cache, privilege, hooks, moved and refs, **area-04 concurrency and damage** (parallel loads, bundle isolation, UTF-8 past refs, cache tamper, session-id collisions and injection, per-session throttle, failed-save retry, corrupt ledgers, purge), write verbs, trials, evals |
+| `tools/test_mem.py` | 106 | resolution and modes (including CI and AI-quality symptoms, asking instead of guessing, `mem asks`, team `extra_symptoms`), directional scope, ledger, cache, privilege, hooks, moved and refs, **area-04 concurrency and damage** (parallel loads, bundle isolation, UTF-8 past refs, cache tamper, session-id collisions and injection, per-session throttle, failed-save retry, corrupt ledgers, purge), write verbs, trials, evals |
 | `tools/test_parsers.py` | 6 | fenced/inline code ignored by claim and relation parsers |
 | `tools/test_atlas.py` | 47 | content, restricted traces, open-under-restricted, publish_authors, 25 tampering cases, duplicate keys, `--against-source`, bare `--out` |
 | `tools/test_init.py` | 16 | `init.py` on a fresh copy: owner row, instance flag, CODEOWNERS, filled placeholders, stamps, git identity, template-only files removed, a clean guard check and first commit; refuses a second run, a bad email, a bad login, `--yes` without `--github` |
@@ -705,8 +723,9 @@ guard-rail that an agent following its instructions will respect and a hostile p
 ## 10. Known limitations
 
 - Mode detection is lexical. A bug report that names neither an intent nor a listed symptom
-  ("drops captions") is still read as build, but the receipt now marks it `A GUESS` and agents are
-  told to ask. Measured on a real 13-feature project tier with asks written before running (2026-09-27): the
+  ("drops captions") gets no confident mode, so `mem load` asks the person instead of loading
+  (exit 2, `ask_the_person`, below); with `protocol.ask_on_guess: false` it loads build and the
+  receipt says `A GUESS`. Measured on a real 13-feature project tier with asks written before running (2026-09-27): the
   tuned 15 at 14/15; a first held-out 10 at 6/10 before the change (2 silent wrong modes, 2 not
   confident); a second held-out 8, written after the change, at 7/8 with the feature right 8 of 8
   (the miss is the flagged guess above). A verb that is also a feature name ("the **export** is

@@ -141,10 +141,16 @@ must be revisited.
 
 Local guards run on the machine of the person being guarded. That is not a flaw to be engineered
 away here; it is why the remote gate exists. Until branch protection is on and
-`enforcement.mode` is `pr`, **the only real enforcement is social.** Turn it on before the second
-person joins, not after.
+`enforcement.mode` is `pr`, **the only real enforcement is social.** That is a fair trade for one
+person or a small team that trusts each other (the Simple setup). Turn protection on once the team
+includes people, contractors or agents you would not hand your laptop to: the hooks in this
+repository run on every teammate's machine.
 
-## Turning on real enforcement (10 minutes, one time)
+## Turning on real enforcement (optional, 15 minutes, one time)
+
+The recommended start is the Simple setup: no branch protection, notes reach `main` at the end of
+every turn, and the guard on each laptop is the only check (README 2.5). Do the steps below when
+the team outgrows that.
 
 1. Run `scripts/init.py`, then fill in `governance/roles.json`: your people, their GitHub logins, roles.
 2. Regenerate `.github/CODEOWNERS` from the owners in `roles.json` with `memory_guard.py codeowners --write`.

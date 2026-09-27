@@ -38,6 +38,10 @@ it finds `memory/` itself).
 2. Read that bundle file. Nothing in it needs a second search.
 3. Post the receipt's first line, e.g.
    `Context · main@a1b2c3 · build mode · Checkout and 4 related notes · 2 already in context`.
+   **Exit 2 instead of a receipt** means `mem` is asking the person: which kind of task, which
+   feature, or both, with ranked options (best guess first). Show the question with its options
+   (Claude Code: AskUserQuestion, from `--json`; elsewhere a numbered list), let them answer in
+   their own words too, and rerun with the chosen args. Never pick for them.
 
 | Exit | Meaning | You do |
 |---|---|---|

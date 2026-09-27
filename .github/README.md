@@ -200,26 +200,37 @@ uv run -q --script scripts/memory_guard.py check --staged        # must say "cle
 git commit -m "cairn: set up the team" && git push -u origin main
 ```
 
-### 5. Turn on the enforcement that actually holds
+### 5. Choose how strict (optional)
 
-Until this step every rule runs on each laptop. After it, GitHub enforces them.
+**Simple, the recommended start:** leave `main` unprotected. Agents' notes reach teammates at the
+end of every turn, and the guard on each laptop checks every sync. That stops honest mistakes
+(an agent editing strategy, a pasted key, an injected instruction), not a determined person: anyone
+who can push to `main` can skip it, including the scripts and hooks that run on every teammate's
+machine. Right for one person or a small team that trusts each other.
 
-1. Set `"enforcement": {"mode": "pr"}` in `governance/roles.json`. Each person's end-of-turn sync
-   then pushes their notes to their own branch, `memory/<you>`, and keeps one pull request open for
-   it, using the GitHub CLI if it is installed (otherwise it prints the link). Nobody pushes to `main`.
+**Protected, when the team outgrows that:** GitHub enforces the rules on a copy the change cannot
+touch. Direct pushes to `main` are refused, so each person's notes travel through their own branch,
+`memory/<you>`, and one pull request per person. With L0 auto-merge on, journal notes still land on
+their own a minute or two later; anything above L0 waits for the person with that role.
+
+To switch to Protected:
+
+1. Set `"enforcement": {"mode": "pr"}` in `governance/roles.json`. (If you forget, the first push
+   GitHub refuses switches the sync to pull requests by itself and tells you.)
 2. In **Settings -> Rules -> Rulesets**, add a ruleset for `main`: require a pull request and Code
    Owner review, **0 required approvals**, dismiss stale approvals, require the checks **`gate`**,
    **`route`**, **`test`** and **`windows-sync`**, and block force pushes and deletion.
-3. Prove the gate with the three throwaway pull requests in [`RUNBOOK.md`](../RUNBOOK.md).
-4. Let observations merge on their own: turn on **Allow auto-merge**, set
-   `"auto_merge_levels": ["L0"]`, and regenerate CODEOWNERS. Journal notes then land once the checks
-   pass; anything above L0 waits for the person with that role.
+3. Prove the gate with the three throwaway pull requests in [`README.md` 2.5](../README.md#25-choose-how-strict-two-setups).
+4. Keep daily notes frictionless: turn on **Allow auto-merge**, set `"auto_merge_levels": ["L0"]`,
+   and regenerate CODEOWNERS.
+
+What the sync does once `main` is protected:
 
 ```mermaid
 flowchart LR
     A["agent's turn ends"] --> S["sync: stamp, check, commit locally"]
     S --> B["push to memory/&lt;you&gt;<br/>(never to main)"]
-    B --> P["one open pull request per person"]
+    B --> P["one open pull request per person<br/>(gh opens it, or the sync prints the link)"]
     P --> G["memory-gate: base revision judges it"]
     G -->|L0 and auto-merge on| M["merged"]
     G -->|L1 to L3| R["waits for the role's reviewer"] --> M
@@ -268,7 +279,7 @@ about SSO"*, *"remember that ..."*.
 `mem` is `uv run -q --script scripts/mem.py`.
 
 ```text
-READ        mem load "<task>" [--touching FILE]     the entry protocol (exit 2 = "which feature?")
+READ        mem load "<task>" [--touching FILE]     the entry protocol (exit 2 = it is asking you)
             mem recall "<question>"                 ranked facts with reasons
 WRITE       mem remember "<fact>" [--feature NAME]  a fact, or a proposal if above your level
             mem gap "<what was missing>"            mem feature new NAME --covers GLOB
@@ -286,8 +297,9 @@ flowchart TD
     R -->|"files you will edit<br/>match a feature's covers"| F
     R -->|"feature names and<br/>nicknames in the ask"| F
     R -->|"words in feature summaries"| F
-    R -->|"no clear winner"| ASK["ask you one question<br/>(exit 2)"]
+    R -->|"no clear winner"| ASK["ask you, with its best guesses<br/>as options (exit 2)"]
     F["the feature note"] --> MODE{"what kind of task?"}
+    MODE -->|"no intent word or symptom"| ASK
     MODE -->|build| UP["+ what it depends on, 2 hops<br/>(dependents as short cards)"]
     MODE -->|"change / remove"| DOWN["+ what depends on it, 2 hops<br/>(what could break)"]
     MODE -->|"fix / debug"| BUG["+ build's scope and the last<br/>30 days of notes about it"]
@@ -295,6 +307,20 @@ flowchart TD
     MODE -->|plan| PLAN["+ every feature card, open<br/>decisions, proposals, gaps"]
     MODE -->|"explain / why"| WHY["+ the decisions behind it"]
 ```
+
+When it is unsure, it asks before loading anything, in one short prompt:
+
+```text
+What kind of task is this (about Checkout)?
+  1. Build something new (best guess)      [--mode build]
+  2. Fix something that is wrong           [--mode debug]
+  3. Change, rename or remove something    [--mode change]
+  4. Understand why it is this way         [--mode explain]
+```
+
+In Claude Code the agent shows this as a clickable question; elsewhere as a numbered list. Pick
+one, or answer in your own words. Teams that prefer no questions set `protocol.ask_on_guess` to
+`false` and get the best guess, marked `A GUESS` in the receipt.
 
 Nothing is loaded twice in a session. In Claude Code, a hook also warns you when a note you loaded
 changed upstream, louder if its contract changed. Hop counts and time windows are settings in
@@ -471,10 +497,11 @@ CI runs all of it on every pull request, plus the sync scenarios on a Windows ru
 
 ## Security model and limits
 
-- **Nothing is a security boundary until `main` is protected.** Before that, the guard on each
-  laptop is a guard-rail that an agent following its instructions respects and a hostile process
-  can skip. After it, a change reaches `main` only through a pull request the base revision has
-  judged and, above the auto-merge levels, a Code Owner has approved.
+- **Nothing is a security boundary in the Simple setup** (unprotected `main`, the recommended
+  start). The guard on each laptop is a guard-rail that an agent following its instructions
+  respects and a hostile process can skip; that includes the scripts and hooks every teammate's
+  machine runs. In the Protected setup, a change reaches `main` only through a pull request the
+  base revision has judged and, above the auto-merge levels, a Code Owner has approved.
 - On a laptop, an agent cannot promote itself with `MEMORY_ACTOR_KIND=human`: inside an agent
   runtime with no terminal the claim is ignored. A process can still drop the runtime's markers,
   which is why review, not the laptop, is the boundary.
@@ -485,9 +512,10 @@ CI runs all of it on every pull request, plus the sync scenarios on a Windows ru
   not a convention. The Atlas omits every trace of it.
 - Publishing the Atlas is manual (Actions -> atlas); the workflow runs the redaction tests first.
 - Choosing which feature a task is about relies on files and words; it works best when feature
-  notes list the code they cover. It asks when unsure which feature, and the receipt says
-  `A GUESS` when it had to guess the kind of task. On asks it was not tuned on it chose the right
-  feature 8 of 8 times and the right mode 7 of 8.
+  notes list the code they cover. When it is unsure which feature or what kind of task, it asks you
+  with its best guesses as options rather than guessing. On asks it was not tuned on, its first
+  choice of feature was right 8 of 8 times and of task type 7 of 8; the miss is now a question.
+  `mem asks` shows how often guesses are corrected, to improve the word lists from real use.
 
 The full threat model, invariants and known limitations are in
 [`ARCHITECTURE.md`](../ARCHITECTURE.md) sections 7, 9 and 10. To report a vulnerability, see

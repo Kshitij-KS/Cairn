@@ -154,27 +154,51 @@ git push -u origin main
 If you push with a different GitHub account than the one this machine normally uses, see
 [Pushing with a second GitHub account](#pushing-with-a-second-github-account) below.
 
-### 2.5 Turn on the enforcement that actually holds (GitHub web)
+### 2.5 Choose how strict: two setups
 
-Until this step, every rule is only checked on each laptop. After it, GitHub enforces them, and
-agents' notes reach `main` through pull requests the sync opens for them.
+Cairn works in either. **Start with the simple one**; switch when the team outgrows it. Nothing
+else changes between them: the same notes, commands and hooks.
 
-1. **Switch the sync to pull requests.** In `governance/roles.json` set `"enforcement": {"mode": "pr"}`
-   and commit it. From then on each person's end-of-turn sync pushes their notes to their own
-   branch, `memory/<you>`, and keeps **one** pull request open for it (with the GitHub CLI `gh`
-   installed and signed in; otherwise it prints the link to open it). Nobody pushes to `main`.
+| | **Simple** (recommended to start) | **Protected** |
+|---|---|---|
+| GitHub setting | none: `main` is not protected | a ruleset on `main` (below) |
+| `roles.json` | `"enforcement": {"mode": "direct"}` (the default) | `"mode": "pr"` |
+| An agent's note reaches teammates | at the end of the turn: the sync pushes straight to `main` | through a pull request: seconds after the checks pass with auto-merge for L0, or when someone merges it |
+| Who checks the rules | the guard on each laptop, at every sync | the guard on each laptop **and** GitHub, on a copy of the rules the change cannot touch |
+| Right for | one person, or a small team that trusts each other and their agents | more people, contractors, or anyone you would not hand your laptop to |
+
+**What Simple gives up, stated plainly.** In the Simple setup the rules are enforced by the guard on
+each laptop. That stops honest mistakes: an agent editing strategy, a pasted key, an injection in a
+note. It does not stop someone determined, because anyone who can push to `main` can skip the
+guard. The part that matters most is not the notes: this repository also holds the scripts and
+hooks that run **automatically on every teammate's machine** when a session starts. Without
+protection, a bad change to `scripts/` or `.claude/` reaches everyone's laptop on their next session.
+If that risk is acceptable for your team, Simple is the right choice.
+
+**If you turn protection on, this is what happens.** Direct pushes to `main` are refused, so the
+sync changes route automatically: each person's notes go to their own branch, `memory/<you>`, and
+**one** pull request per person stays open for them (the sync opens it with the GitHub CLI `gh`
+if it is installed and signed in, otherwise it prints the link to open). Nothing is lost and
+nothing is force-pushed. When that pull request merges, the next session start leaves your laptop
+level with `main`. If you forget to set `"mode": "pr"`, the first refused push switches to the same
+path by itself and tells you to set it.
+
+**To switch to Protected** (owner, GitHub web, about 15 minutes):
+
+1. Set `"enforcement": {"mode": "pr"}` in `governance/roles.json` and commit it.
 2. **Settings -> Branches -> Add ruleset for `main`**: require a pull request; require review from
-   Code Owners; **required approvals: 0** (Code Owner review is what decides who must approve);
-   dismiss stale approvals; require the status checks **`gate`**, **`route`**, **`test`** and
+   Code Owners; **required approvals: 0** (Code Owner review decides who must approve); dismiss
+   stale approvals; require the status checks **`gate`**, **`route`**, **`test`** and
    **`windows-sync`** (they appear after the first pull request runs); block force pushes and
    deletion.
 3. Prove the gate with the three throwaway pull requests below before trusting anything to it.
-4. **Then let observations merge on their own**: Settings -> General -> **Allow auto-merge**; set
+4. **Keep daily notes frictionless**: Settings -> General -> **Allow auto-merge**; set
    `"auto_merge_levels": ["L0"]` in `roles.json`; run
    `uv run -q --script scripts/memory_guard.py codeowners --write` and commit both. CODEOWNERS then
-   names reviewers only for levels above L0, and the gate enables auto-merge on pull requests it
-   classifies L0: an agent's journal note lands once the checks pass, while a change to features,
-   context, decisions or the rules still waits for the person with that role.
+   names reviewers only for levels above L0, and the gate turns on auto-merge for pull requests it
+   classifies L0: an agent's journal note lands on its own once the checks pass (usually within a
+   couple of minutes), while a change to features, context, decisions or the rules still waits for
+   the person with that role.
 - Publishing the map (Actions -> atlas) commits `web/data/graph.json` straight to `main` as
   `github-actions[bot]`. With the ruleset above that push is refused unless you add
   **GitHub Actions** to the ruleset's bypass list. Only do that if you publish the map; the
@@ -188,6 +212,9 @@ The three throwaway pull requests (close each after checking):
    `scripts/`: labelled `memory:L3`.
 
 If any behaves differently, stop: the gate is not doing its job.
+
+**To go back to Simple**: delete the ruleset and set `"mode": "direct"`. Open `memory/<you>` pull
+requests can be merged or closed; the next sync pushes to `main` again.
 
 ### Pushing with a second GitHub account
 
@@ -305,7 +332,10 @@ short description. What comes with it depends on the task:
 | planning | every feature's summary, open decisions, waiting proposals |
 | asking why | the decisions behind it |
 
-If it cannot tell which feature you mean, it asks you one question instead of guessing.
+If it cannot tell which feature you mean, or what kind of task it is, it asks you before loading
+anything: a short question with its best guesses as options, the most likely first. Pick one, or
+answer in your own words. `mem asks` shows how often the guesses were right, so the word lists
+can be improved from real corrections.
 
 ---
 
@@ -337,7 +367,8 @@ The skill in `.agents/skills/team-memory/` tells the agent which command to run.
 
 | Command | Does |
 |---|---|
-| `mem load "<task>" [--touching FILE]` | the entry protocol; exit 2 means "which feature?" |
+| `mem load "<task>" [--touching FILE]` | the entry protocol; exit 2 means it is asking you a question (`--json` for the options as data) |
+| `mem asks` | how often its guesses were accepted or corrected, and what to add so it guesses better |
 | `mem recall "<question>"` | ranked facts with reasons |
 | `mem remember "<fact>" [--feature NAME]` | keep a fact (a proposal if above your level) |
 | `mem gap "<what was missing>"`, `mem gaps` | record, list unanswered questions |
@@ -405,7 +436,8 @@ to merge, and running it again changes nothing. Agents then search both tiers, p
 
 | Exit | Meaning | Do this |
 |---|---|---|
-| 2 | merge conflict, or "which feature?" from `mem load` | resolve by hand and sync again; for `mem load`, add `--feature "<name>"` |
+| 2 | merge conflict, or a question from `mem load` | resolve by hand and sync again; for `mem load`, answer its question (your agent shows the options) |
+| 7 | the native sync script's push was refused because `main` is protected | nothing: `sync-memory.py` turns it into a pull request; set `"mode": "pr"` to skip the refused push |
 | 3 | a secret was about to be stored | remove the value; say where it lives instead |
 | 4 | the change is above your level | write it as a proposal (`mem remember` does it for you) |
 | 5 | the note failed validation | read the finding: missing relation, duplicate, wrong level, bad attribution |
@@ -438,18 +470,20 @@ cd web/test && npm ci && npm test  # the map's page, including a privacy check o
 
 ## 12. Status and limits
 
-- **Nothing is a security boundary until step 2.5 is done.** Before branch protection, every rule
-  runs on each laptop, where a determined process can skip it. After it, a change reaches `main`
-  only through a pull request that the base revision's code has judged and, above the auto-merge
-  levels, the person with the role has approved. On a laptop the guard ignores an agent's claim to
-  be a person (`MEMORY_ACTOR_KIND=human` with an agent runtime and no terminal), but a process can
-  still drop the markers: review is the boundary.
+- **Simple setup:** the rules run on each laptop at every sync. They stop honest mistakes, not a
+  determined person; anyone who can push to `main` can skip them, including the scripts and hooks
+  that run on every teammate's machine (2.5).
+- **Protected setup:** a change reaches `main` only through a pull request that the base
+  revision's code has judged and, above the auto-merge levels, the person with the role has
+  approved. On a laptop the guard also ignores an agent's claim to be a person
+  (`MEMORY_ACTOR_KIND=human` inside an agent runtime with no terminal), but a process can still drop
+  the runtime's markers: review is the boundary.
 - **Automatic publishing of the map is off.** Publish by hand: Actions -> atlas -> Run workflow.
   The workflow runs the redaction tests first.
 - Choosing which feature a task is about relies on files and words; it works best when feature
-  notes list the code they cover. When unsure which feature, it asks; when it has to guess the mode,
-  the receipt says `A GUESS`. Measured on asks it was not tuned on: the feature right 8 of 8, the
-  mode right 7 of 8 (one guessed build for a bug report, flagged as a guess).
+  notes list the code they cover. When it is unsure which feature or what kind of task, it asks
+  you with its best guesses as options instead of guessing. Measured on asks it was not tuned on:
+  its first choice of feature right 8 of 8, of task type 7 of 8 (the miss is now a question).
 - Known open items: heavy edits can move a fact's id to an unrelated fact; an experiment comparison
   can report success when the experiment changes the tests themselves; a scaffolded project tier gets
   a `memory-gate` workflow and the memory block of CODEOWNERS, but its notes ride the code

@@ -47,6 +47,7 @@ Exit codes: 0 ok · 2 ambiguous (ask the person one question) · 4 not permitted
 """
 
 import argparse
+import glob
 import hashlib
 import importlib.util
 import json
@@ -54,7 +55,7 @@ import os
 import re
 import sys
 import time
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -959,12 +960,128 @@ ROLE_ORDER = ["core", "about", "target", "the decision", "implemented by", "reli
               "feature cards", "open decisions", "waiting proposals", "gaps", "recent change", "pinned"]
 
 
+# --------------------------------------------------------------------------- asking instead of guessing
+
+MODE_CHOICES = [
+    ("build", "Build something new", "load what it relies on"),
+    ("debug", "Fix something that is wrong", "load it, what it relies on, and 30 days of notes about it"),
+    ("change", "Change, rename or remove something", "load what could break"),
+    ("explain", "Understand why it is this way", "load the decisions behind it"),
+]
+
+
+def _qlog(mem, record):
+    """Questions asked and answers given, for `mem asks`. Never the ask text (a task description can
+    hold anything): a salted hash pairs a question with its answer."""
+    with open(mem.local.path("logs", "asks-%s.jsonl" % TODAY.strftime("%Y-%m")), "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(dict(record, at=datetime.now(timezone.utc).isoformat())) + "\n")
+
+
+def _ask_key(mem, ask):
+    return sha(mem.local.salt() + (ask or "").strip().lower())[:16]
+
+
+def ask_the_person(mem, a, mode_guess, feature_candidates, no_match, about=None):
+    """Print the question(s) mem needs answered, with ranked options, and return EXIT_AMBIGUOUS.
+
+    The agent shows them to the person as they are (Claude Code: AskUserQuestion; elsewhere a
+    numbered list), always allowing an answer in their own words, then reruns with the chosen
+    option's args. Nothing is loaded until then."""
+    questions = []
+    if mode_guess:
+        order = [mode_guess] + [m for m, _l, _d in MODE_CHOICES if m != mode_guess]
+        info = {m: (l, d) for m, l, d in MODE_CHOICES}
+        questions.append({"id": "mode", "header": "Task type", "question": "What kind of task is this%s?"
+                          % (" (about %s)" % about if about else ""),
+                          "options": [{"label": info[m][0] + (" (best guess)" if i == 0 else ""),
+                                       "description": info[m][1], "args": "--mode %s" % m}
+                                      for i, m in enumerate(order) if m in info]})
+    if feature_candidates is not None:
+        opts = [{"label": n["title"] + (" (best match)" if i == 0 else ""),
+                 "description": "; ".join(rs[:2]) or "matched the ask", "args": '--feature "%s"' % n["title"]}
+                for i, (sc, n, rs) in enumerate(feature_candidates[:3])]
+        opts.append({"label": "None of these", "description": "load the big picture only; name the feature afterwards",
+                     "args": "--mode orient"})
+        questions.append({"id": "feature", "header": "Feature", "question":
+                          ("No feature matched this ask. Which part of the product is it about?" if no_match
+                           else "Which part of the product is this about?"), "options": opts})
+    rerun = 'mem load "%s" %s' % ((a.ask or "").replace('"', "'"), " ".join("<%s>" % q["id"] for q in questions))
+    _qlog(mem, {"k": _ask_key(mem, a.ask), "asked": [q["id"] for q in questions], "guess": mode_guess,
+                "candidates": [n["title"] for _s, n, _r in (feature_candidates or [])[:3]]})
+    if a.json:
+        print(json.dumps({"ask_the_person": questions, "rerun": rerun}, indent=1))
+        return EXIT_AMBIGUOUS
+    print("mem: one question for the person before loading (exit 2). Show it with its options; they may "
+          "also answer in their own words.")
+    for q in questions:
+        print("\n%s" % q["question"])
+        for i, o in enumerate(q["options"], 1):
+            print("  %d. %s - %s   [%s]" % (i, o["label"], o["description"], o["args"]))
+    print("\nThen rerun with the chosen args: %s" % rerun)
+    return EXIT_AMBIGUOUS
+
+
+def cmd_asks(mem, a):
+    """What the questions taught: how often each guess was right, and what people chose instead."""
+    asked, answers = 0, []
+    for fn in sorted(glob.glob(mem.local.path("logs", "asks-*.jsonl"))):
+        for line in open(fn, encoding="utf-8"):
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            if rec.get("asked"):
+                asked += 1
+            elif rec.get("answer"):
+                answers.append(rec)
+    if not asked:
+        print("mem: no questions asked on this machine yet.")
+        return EXIT_OK
+    mode_pairs = Counter((r["guess"], r["answer"].get("mode")) for r in answers if r.get("guess") and r["answer"].get("mode"))
+    feat = Counter(
+        "top match" if r["answer"].get("feature") and r.get("candidates") and r["answer"]["feature"] == r["candidates"][0]
+        else "another listed option" if r["answer"].get("feature") in (r.get("candidates") or [])
+        else "not listed" for r in answers if r["answer"].get("feature"))
+    print("mem: %d question(s) asked on this machine, %d answered." % (asked, len(answers)))
+    for (g, c), n in mode_pairs.most_common():
+        print("  task type: guessed %s, person chose %s  x%d" % (g, c, n))
+    for k, n in feat.most_common():
+        print("  feature: person chose the %s  x%d" % (k, n))
+    wrong_bugs = sum(n for (g, c), n in mode_pairs.items() if g == "build" and c == "debug")
+    if wrong_bugs:
+        print("  -> %d bug report(s) named no symptom the protocol knows. Add the words your team uses to "
+              "protocol.extra_symptoms in governance/roles.json." % wrong_bugs)
+    if feat.get("not listed"):
+        print("  -> %d ask(s) named a feature by words its note does not carry. Add them as `aliases:` on that "
+              "feature note (mem remember writes the proposal)." % feat["not listed"])
+    return EXIT_OK
+
+
 def cmd_load(mem, a):
     corpus, ref = mem.corpus(a.ref)
     who = mem.acting()
     mode, why_mode = (a.mode, "you chose it") if a.mode else detect_mode(a.ask, who["function"], mem.proto.get("extra_symptoms") or ())
     if mode not in MODES:
         die("unknown mode %r; one of %s" % (mode, ", ".join(MODES)))
+    # With no intent word and no symptom, ask rather than guess (protocol.ask_on_guess, default on).
+    # An explicit --feature is context enough: load, and the receipt still says A GUESS.
+    mode_guess = mode if (not a.mode and not a.feature and why_mode.startswith("A GUESS")
+                          and mem.proto.get("ask_on_guess", True)) else None
+    if a.mode or a.feature:
+        # an answer to an earlier question, if one was asked for this same ask
+        k = _ask_key(mem, a.ask)
+        pending = None
+        for fn in sorted(glob.glob(mem.local.path("logs", "asks-*.jsonl")))[-2:]:
+            for line in open(fn, encoding="utf-8"):
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if rec.get("k") == k:
+                    pending = rec if rec.get("asked") else None
+        if pending:
+            _qlog(mem, {"k": k, "answer": {"mode": a.mode, "feature": (a.feature or [None])[0]},
+                        "guess": pending.get("guess"), "candidates": pending.get("candidates")})
 
     targets, resolution = [], None
     orient_about = []
@@ -993,16 +1110,12 @@ def cmd_load(mem, a):
             targets = [dranked[0][1]["id"]]
             ranked = dranked
         elif mode not in ("plan",):
-            print("mem: I cannot tell which feature this is about.")
-            if ranked:
-                for sc, n, rs in ranked[:3]:
-                    print("  - %s  (score %.0f: %s)" % (n["title"], sc, "; ".join(rs[:2])))
-                print("Ask the person which one, then: mem load \"%s\" --feature \"<name>\"" % (a.ask or ""))
-                if mode == "explain":
-                    print("A 'why' question may be about a rule rather than a feature: mem recall \"%s\"" % (a.ask or ""))
-            else:
-                print("  No feature matched. Name one with --feature, or load orient mode for the big picture.")
-            return EXIT_AMBIGUOUS
+            if mode == "explain" and not a.json:
+                print("mem: a 'why' question may be about a rule rather than a feature: mem recall \"%s\"" % (a.ask or ""))
+            return ask_the_person(mem, a, mode_guess, ranked or [], not ranked)
+        if mode_guess:
+            about = " and ".join(corpus.notes[t]["title"] for t in targets if t in corpus.notes) or None
+            return ask_the_person(mem, a, mode_guess, None, False, about)
         resolution = ranked[:3]
     if a.add:
         for nm in a.add:
@@ -2162,6 +2275,8 @@ def main(argv):
     p.add_argument("--print", action="store_true", help="print the bundle, not just its path")
     p.add_argument("--json", action="store_true")
 
+    sub.add_parser("asks", help="what the questions taught: guesses the person accepted or corrected")
+
     p = sub.add_parser("resolve"); p.add_argument("ask"); p.add_argument("--touching", action="append")
     p.add_argument("--ref"); p.add_argument("--json", action="store_true")
     p = sub.add_parser("recall"); p.add_argument("query"); p.add_argument("--limit", type=int, default=15)
@@ -2226,7 +2341,7 @@ def main(argv):
                 a.id = sid
     mem = Mem(a)
     table = {
-        "load": cmd_load, "resolve": cmd_resolve, "recall": cmd_recall, "context": cmd_context,
+        "load": cmd_load, "asks": cmd_asks, "resolve": cmd_resolve, "recall": cmd_recall, "context": cmd_context,
         "session": cmd_session, "moved": cmd_moved, "compile": cmd_compile, "remember": cmd_remember,
         "retire": cmd_retire, "why": cmd_why, "gap": cmd_gap, "gaps": cmd_gaps, "feature": cmd_feature,
         "features": cmd_features, "propose": cmd_propose, "approve": cmd_approve, "try": cmd_try,

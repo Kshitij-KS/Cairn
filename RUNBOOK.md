@@ -10,7 +10,8 @@ updated: 2026-09-27
 # Setup runbook: in order, start to finish
 
 The checklist behind README sections 2-4, with the check that proves each phase worked. Phases run
-in order; **Phase 4 is the one that turns advisory checks into enforced ones.**
+in order; **Phase 4 is optional**: skipping it gives the Simple setup (the recommended start), doing
+it turns advisory checks into enforced ones.
 
 ## Phase 0 - install (10 min, once per machine)
 
@@ -33,7 +34,11 @@ Check: `memory_guard.py codeowners` prints "CODEOWNERS matches roles.json".
 README 2.4, and "Pushing with a second GitHub account" if this machine uses another account.
 Check: the repository on GitHub is **private** and shows `governance/`, `scripts/`, `context/`.
 
-## Phase 4 - protect main (10 min, owner, GitHub web)
+## Phase 4 - optional: protect main (15 min, owner, GitHub web)
+
+Skip this phase for the Simple setup (README 2.5 explains the trade: rules checked on each laptop,
+notes reach `main` at the end of every turn, no protection against someone determined). Do it when
+more people, contractors or less trusted agents join.
 
 README 2.5: set `enforcement.mode` to `"pr"`; ruleset on `main` requiring pull requests, Code
 Owner review with 0 required approvals, and the checks `gate`, `route`, `test`, `windows-sync`; no
@@ -105,7 +110,7 @@ README section 10 lists every exit code and what to do. `memory_guard.py check -
 findings without committing; `memory_guard.py explain` reminds you of your ceiling.
 
 ## Observations
-- [rule] Phases run in order; Phase 4 is the one that converts advisory checks into enforced ones ^0c3f69
+- [rule] Phases run in order; Phase 4 is optional and is the one that converts advisory checks into enforced ones ^0c3f69
 - [rule] Every teammate's git email in this repository must match their row in governance/roles.json or attribution fails ^ba54e5
 - [rule] `--no-verify` defeats the local guard; reaching for it is the signal to write a proposal instead ^eea39b
 

@@ -21,8 +21,9 @@ Run `uv run -q --script scripts/mem.py load "<the ask, in the person's words>" -
 It loads `CORE.md` + the feature map, resolves the feature, picks a mode (orient, build, change,
 debug, review, plan, explain) and loads that mode's scope by direction: build = what the target
 relies on; change = what relies on it; plan = every feature's card. Then:
-read the one bundle file it names; post the receipt's first line; exit code 2 = ambiguous, so ask
-the person one question and re-run with `--feature "<name>"`. Do not re-read what the receipt says
+read the one bundle file it names; post the receipt's first line; exit code 2 = `mem` is asking the
+person which kind of task and/or which feature: show its question with its options (they may answer
+in their own words) and rerun with the chosen args. Never pick for them. Do not re-read what the receipt says
 is already in context; after compaction run `load` again. Mid-task: `mem load --add "<title>"`,
 `mem recall "<question>"`. A named past version: `--ref main@YYYY-MM-DD`, never mixed with latest.
 `memory: YOUR CONTEXT MOVED` = re-read those notes; `CONTRACT CHANGED` = re-check dependents.

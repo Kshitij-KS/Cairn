@@ -424,6 +424,8 @@
     "core_max_tokens": 3000,
     "extra_symptoms": [],
     "$comment_extra_symptoms": "Regular expressions for how bug reports in YOUR domain describe a symptom, added to mem.py's generic list (has no, missing, wrong, stuck, times out, too slow, ...). An ask with no intent word that matches one is read as debug. Example for a web app: [\"\\\\bspins forever\\\\b\", \"\\\\b404\\\\b\", \"\\\\blogged out\\\\b\"].",
+    "ask_on_guess": true,
+    "$comment_ask_on_guess": "When mem load cannot tell the kind of task (no intent word, no symptom) or the feature, it asks the person with ranked options instead of loading a guess. false: load the best guess and mark it A GUESS in the receipt.",
     "code_root": ".",
     "$comment_code_root": "where features' covers: globs resolve, relative to the repo root. '.' = this repo (cairn's features cover its own scripts). MEMORY_CODE_ROOT overrides it."
   },

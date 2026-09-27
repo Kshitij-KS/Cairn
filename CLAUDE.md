@@ -62,10 +62,14 @@ Then:
 2. **Post the receipt's first line** to the person before you start, e.g.
    `Context · main@a1b2c3 · change mode · Checkout and 5 related notes`. If the mode or the feature is
    wrong, they will tell you in a word; re-run with `--mode` or `--feature`.
-3. **Exit code 2 means it could not tell which feature this is.** Ask the person *one* question —
-   which of the features it listed — then re-run with `--feature "<name>"`. Do not guess.
-4. **A receipt whose mode says `A GUESS`** means the ask named no intent and no symptom. Say so in
-   that same first line and ask whether this is a bug (`--mode debug`) or new work before you start.
+3. **Exit code 2 means `mem` needs one answer from the person** — which kind of task this is, which
+   feature, or both. It prints the question with ranked options, best guess first, each with the
+   args to rerun with. Show it as it is: in Claude Code use the AskUserQuestion tool (`--json` gives
+   the questions as data: `header`, `question`, `options[].label/description/args`); elsewhere a
+   short numbered list. The person may pick an option or answer in their own words. Rerun with the
+   chosen args (or `--mode` / `--feature` from their words). Never pick for them.
+4. If a team has turned asking off (`protocol.ask_on_guess: false`), a receipt whose mode says
+   `A GUESS` is the same situation: say so in that first line and ask before you start.
 
 While you work:
 
