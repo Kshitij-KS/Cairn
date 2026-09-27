@@ -840,7 +840,10 @@ def detect_mode(ask, function=None, extra_symptoms=()):
     return "build", "A GUESS: no intent word or symptom; if this is a bug, rerun with --mode debug"
 
 
-PATH_TOKEN = re.compile(r"(?:[A-Za-z]:)?[\w.\-]*[\\/][^\s\"'`,;]+|[\w\-]+\.[A-Za-z0-9]{1,6}\b|\b\w+_\w+\b")
+# A path has a separator or an extension. A bare identifier (`build_report`) is NOT a path: it is a
+# word, and file-stem matching below needs it (treating it as a path broke that, found by the
+# eval of a real project tier).
+PATH_TOKEN = re.compile(r"(?:[A-Za-z]:)?[\w.\-]*[\\/][^\s\"'`,;]+|[\w\-]+\.[A-Za-z][A-Za-z0-9]{0,5}\b")
 
 
 def path_tokens(ask):

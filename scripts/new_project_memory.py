@@ -386,6 +386,19 @@ def main(argv):
 
     if "--no-hook" not in flags:
         install_hook(rep, target)
+    # A .suggested file is for a person to merge, never to commit: the printed `git add -A .claude`
+    # swept one into the product repository. Excluded locally (this clone only, nothing committed).
+    rc, gitdir = git(target, "rev-parse", "--absolute-git-dir")
+    if rc == 0 and gitdir:
+        ex = os.path.join(gitdir, "info", "exclude")
+        have = (read_bytes(ex) or b"").decode("utf-8", "replace")
+        if "*.team-memory.suggested" not in have.split("\n"):
+            try:
+                os.makedirs(os.path.dirname(ex), exist_ok=True)
+                with open(ex, "a", encoding="utf-8", newline="\n") as fh:
+                    fh.write(("" if not have or have.endswith("\n") else "\n") + "*.team-memory.suggested\n")
+            except OSError as e:
+                rep.errors.append(".git/info/exclude: %s" % (e.strerror or e))
 
     # 9. Basic Memory registration (optional)
     reg = "skipped (basic-memory not on PATH)"

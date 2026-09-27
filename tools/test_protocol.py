@@ -20,7 +20,7 @@ sys.path.insert(0, HERE)
 import testpolicy  # noqa: E402
 
 REPO = os.path.dirname(HERE)
-EXPECTED = 29
+EXPECTED = 30
 RESULTS = []
 
 
@@ -78,7 +78,7 @@ class Tier:
         write(n, ".basic-memory/project.json", '{"name": "proj", "kind": "project"}\n')
         write(self.root, ".gitignore", ".memory/\n__pycache__/\n")
         for f in ("src/alpha/a.py", "src/beta/b.py", "src/target/t.py", "src/middle/m.py", "src/found/f.py",
-                  "src/down1/d.py", "src/explainer/e.py", "src/export/export_layouts.mjs", "src/lib/compose.py"):
+                  "src/down1/d.py", "src/explainer/e.py", "src/export/export_layouts.mjs", "src/lib/compose_helper.py"):
             write(self.root, f, "# code\n")
         write(n, "CORE.md", "---\ntitle: Core\ntype: context\ntags: [core]\n---\n\n# Core\n\nWe make things.\n\n"
                             "## Observations\n- [constraint] Things ship daily\n\n## Relations\n- relates_to [[Alpha]]\n")
@@ -166,6 +166,9 @@ def test_protocol(t):
     rc, d = t.load("fix D:\\work\\repo\\src\\export\\export_layouts.mjs", sess="f6")
     tg = d.get("targets") or []
     ok("03-F6: a Windows path in the ask resolves to the one feature that covers the file", rc == 0 and tg == ["features/layout-engine"], (rc, tg))
+    rc2, out2 = t.mem("resolve", "--json", "compose_helper is failing on spaces")
+    ok("a bare identifier (compose_helper) still resolves to the feature owning that file", '"title": "Export"' in out2
+       and '"confident": true' in out2, out2[-300:])
     rc, d = t.load("Target is broken", sess="f7")
     ok("03-F7: an undated journal note is not 'recent history'", rc == 0 and "log/journal/recent" in notes_of(d)
        and "log/journal/undated" not in notes_of(d), notes_of(d))

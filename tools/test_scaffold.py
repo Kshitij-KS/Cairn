@@ -22,7 +22,7 @@ import testpolicy  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
-PER_IMPL = 21
+PER_IMPL = 22
 RESULTS = []
 
 
@@ -189,6 +189,11 @@ def cases(impl, tmp):
     sugg = os.path.join(b, ".github", "CODEOWNERS.team-memory.suggested")
     ok("an existing CODEOWNERS is left exactly as it was; the memory block goes to a .suggested file",
        rc == 0 and kept and os.path.isfile(sugg) and "/memory/" in open(sugg).read(), (rc, out[-300:]))
+    for c in printed_commands(out):
+        subprocess.run(c, shell=True, cwd=b, env=env(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    tracked = subprocess.run(["git", "ls-files"], cwd=b, stdout=subprocess.PIPE, text=True).stdout
+    ok("a .suggested file is never swept into the commit by the printed commands", ".team-memory.suggested" not in tracked
+       and "memory/scripts/mem.py" in tracked, [l for l in tracked.splitlines() if "suggested" in l])
     ok("08-F7: an existing Kiro hook and command are kept, with .suggested files the report names",
        open(os.path.join(b, ".kiro", "hooks", "memory-post-task.json")).read() == '{"theirs": true}\n'
        and os.path.isfile(os.path.join(b, ".kiro", "hooks", "memory-post-task.json.team-memory.suggested"))
