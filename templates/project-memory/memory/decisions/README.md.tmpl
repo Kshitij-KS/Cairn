@@ -1,0 +1,23 @@
+---
+title: __PROJECT_TITLE__ ADR Process
+type: process
+permalink: decisions/readme
+tags: [adr, decisions, process, __PROJECT_NAME__]
+---
+
+# decisions/ — project ADRs
+
+Same process as cairn (`decisions/README.md` there): copy `ADR-000-template.md` to
+`ADR-NNN-<slug>.md`, status `proposed` → `accepted` via PR, supersede instead of rewriting, never
+delete. Agents propose via a note in `log/proposals/` titled `PROPOSAL - ADR-<title>`.
+
+Put an ADR **here** when it binds only this project. If it binds the company (a vendor, a
+company-wide rule, a cross-project boundary), it belongs in cairn.
+
+## Observations
+- [rule] Only `status: accepted` ADRs are authoritative
+- [rule] Project-scoped decisions here; company-scoped decisions in cairn
+
+## Relations
+- relates_to [[__PROJECT_TITLE__ Architecture]]
+- relates_to [[ADR Process]]

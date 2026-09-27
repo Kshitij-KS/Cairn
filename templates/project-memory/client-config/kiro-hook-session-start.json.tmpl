@@ -1,0 +1,25 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "project-memory-pull",
+      "description": "Pull the latest project memory (memory/) and register it with Basic Memory. Kiro IDE only (SessionStart is not available on Kiro CLI/Web): run `uv run -q --script memory/scripts/sync-memory.py pre` by hand there.",
+      "trigger": "SessionStart",
+      "action": {
+        "type": "command",
+        "command": "uv run -q --script memory/scripts/sync-memory.py pre --agent"
+      },
+      "timeout": 120
+    },
+    {
+      "name": "project-memory-session",
+      "description": "Open a session ledger so `mem load` knows what this session already read.",
+      "trigger": "SessionStart",
+      "action": {
+        "type": "command",
+        "command": "uv run -q --script memory/scripts/mem.py session start"
+      },
+      "timeout": 30
+    }
+  ]
+}

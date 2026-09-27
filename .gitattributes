@@ -1,0 +1,4 @@
+# Keep LF everywhere: shell scripts break on CRLF, and the guard compares some files byte for byte.
+* text=auto eol=lf
+*.png binary
+*.jpg binary

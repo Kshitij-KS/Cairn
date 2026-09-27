@@ -1,0 +1,33 @@
+---
+description: Team memory rules for __PROJECT_NAME__ — read Basic Memory (this project + cairn) before any task, write durable learnings after, propose-only for context/ and decisions/
+globs:
+alwaysApply: true
+---
+
+# Team memory rules — project `__PROJECT_NAME__`
+
+Two Basic Memory projects serve this repo: **`__PROJECT_NAME__`** (`memory/`, project facts) and
+**`cairn`** (company-wide). Full text of the rules: `memory/AGENT-RULES.md`. Skill:
+`team-memory` (`memory/.agents/skills/team-memory/SKILL.md`, copy in `.claude/skills/`).
+
+1. **BEFORE any task** — run
+   `uv run -q --script memory/scripts/mem.py load "<the ask>" --touching <file>...` from the repo
+   root. It loads this project's `CORE.md` and feature map, resolves the feature, picks a mode and
+   loads the neighbourhood by direction. Read the bundle file it names; post the receipt's first
+   line; exit 2 = ask the person which feature, re-run with `--feature`. Company-wide canon is in
+   `cairn` (run the same command there, or `search_notes` with `search_all_projects: true`).
+   If `mem.py` cannot run: `search_notes` + `read_note` on `CORE.md`, `features/`, `context/`,
+   accepted ADRs, and post `Memory: read <n> notes — <fact>; <fact>; <ADR or "no ADR">.`
+2. **TRUST ORDER** — `decisions/` (accepted) > `CORE.md`, `features/`, `context/` > `projects/` > `log/`; across tiers the
+   owning scope wins. Contradiction → flag to the human, never pick silently.
+3. **AFTER work — durable only** — decisions, architecture changes, non-obvious gotchas, owner
+   changes. Never task chatter or anything re-derivable from code/git.
+4. **WRITE TARGETS** — `memory/log/` freely (`project: "__PROJECT_NAME__"`, `directory: "log"`);
+   `context/` and `decisions/` propose-only via `PROPOSAL - <what>` notes tagged `proposal`.
+   Company-wide facts → cairn `log/`.
+5. **FORMAT** — frontmatter (title, type, tags), `## Observations` (`- [category] fact`),
+   `## Relations` with ≥1 single-token relation, e.g. `relates_to [[__PROJECT_TITLE__ Overview]]`.
+6. **NEVER store** — credentials, keys, tokens, PII, salaries, private-DM content.
+
+Cursor has no hooks: run `memory/scripts/sync-memory.sh pre|post` (or `.ps1` on Windows) around a
+session. On a reported merge conflict, stop and tell the human which files.

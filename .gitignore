@@ -1,0 +1,33 @@
+# Basic Memory never writes into the repo (index lives in ~/.basic-memory), but guard anyway
+*.db
+*.db-shm
+*.db-wal
+.bmignore
+memory.json
+
+# Local-only client state
+.claude/settings.local.json
+CLAUDE.local.md
+.cursor/mcp.local.json
+.kiro/settings/*.local.json
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Never commit secrets
+.env
+.env.*
+!.env.example
+
+# The unredacted local build of the map. Never commit or deploy this.
+web/data/graph.full.json
+
+# mem.py's local state: cache, bundles, session ledgers, recall logs, personal pins. Per machine.
+.memory/
+__pycache__/
+web/test/.work/
+web/test/node_modules/

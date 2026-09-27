@@ -1,0 +1,15 @@
+Cairn
+Copyright 2026 Kshitij Singh
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Cairn does not bundle or modify any third-party code. It works alongside the following separately
+installed programs, each under its own licence:
+
+  Basic Memory     AGPL-3.0-or-later   the local MCP server that indexes the notes. Cairn runs it
+                                       as a separate, unmodified process; it is not distributed here.
+  uv               MIT or Apache-2.0   runs the scripts.
+  Git              GPL-2.0             stores and moves the notes.
+
+The Memory Atlas page loads d3 (ISC) from a CDN at view time. Its offline tests install d3 (ISC)
+and jsdom (MIT) through npm into web/test/node_modules, which is not committed.

@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "team-memory-moved",
+      "description": "Before each prompt (at most every 5 minutes), tell the agent if a note it loaded this session changed upstream, and whether its Contract changed. Silent when nothing moved. UNVERIFIED: that Kiro offers a UserPromptSubmit-style trigger and adds command output to context; if not, run `mem moved` by hand.",
+      "trigger": "UserPromptSubmit",
+      "action": {
+        "type": "command",
+        "command": "uv run -q --script scripts/mem.py moved --quiet --fetch --throttle 300"
+      },
+      "timeout": 30
+    }
+  ]
+}

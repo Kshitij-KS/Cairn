@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memory Atlas</title>
+<meta name="description" content="A map of the team's shared memory: what it holds, what changed, and what is waiting on a person.">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
+<script>
+  // Applied before first paint so the page never flashes the wrong theme.
+  try {
+    var t = localStorage.getItem("atlas-theme");
+    if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+  } catch (e) {}
+</script>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%23F4F1E9'/><path d='M9 11 L20 19 M20 19 L25 9' stroke='%236E6656' stroke-width='1.2'/><circle cx='9' cy='11' r='3.4' fill='%233A5A86'/><circle cx='20' cy='19' r='2.6' fill='%238A621A'/><circle cx='25' cy='9' r='1.8' fill='%23C03A22'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Skeleton of the real layout, so the page does not jump when the data lands. -->
+<div id="boot" class="boot" aria-hidden="true">
+  <div class="boot-plot">
+    <div class="sk circle" style="width:54px;height:54px;margin:80px 0 0 140px"></div>
+    <div class="sk circle" style="width:34px;height:34px;margin:-20px 0 0 320px"></div>
+    <div class="sk circle" style="width:44px;height:44px;margin:60px 0 0 200px"></div>
+    <div class="sk circle" style="width:26px;height:26px;margin:-70px 0 0 420px"></div>
+    <p class="boot-msg">Developing the plate</p>
+  </div>
+  <div class="boot-rail">
+    <div class="sk" style="height:13px;width:45%"></div>
+    <div class="sk" style="height:13px;width:80%;margin-top:14px"></div>
+    <div class="sk" style="height:13px;width:65%;margin-top:10px"></div>
+    <div class="sk" style="height:13px;width:74%;margin-top:26px"></div>
+    <div class="sk" style="height:13px;width:58%;margin-top:10px"></div>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="brand">
+    <h1>Memory Atlas</h1>
+    <p class="brand-sub" id="brand-sub">Loading</p>
+  </div>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="topbar-right">
+    <p class="freshness" id="freshness"></p>
+    <button class="link-btn" id="help-btn">How to read this</button>
+    <button class="theme-btn" id="theme-btn" aria-label="Switch between the dark and light chart">
+      <svg class="i-moon" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3">
+        <path d="M13.5 9.6A5.8 5.8 0 0 1 6.4 2.5 5.8 5.8 0 1 0 13.5 9.6Z"/>
+      </svg>
+      <svg class="i-sun" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3">
+        <circle cx="8" cy="8" r="3.1"/>
+        <path d="M8 1v1.6M8 13.4V15M1 8h1.6M13.4 8H15M3.1 3.1l1.1 1.1M11.8 11.8l1.1 1.1M12.9 3.1l-1.1 1.1M4.2 11.8l-1.1 1.1"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<section class="briefing" aria-live="polite">
+  <p id="briefing">Reading the memory</p>
+  <span class="since" id="since"></span>
+</section>
+
+<main class="layout">
+
+  <section class="atlas" id="atlas">
+    <div class="atlas-controls">
+      <div class="seg" id="seg-arrange" role="group" aria-label="How the map is arranged">
+        <button data-arrange="area" aria-pressed="true"
+                title="Group by where a note lives: the shape of what the team knows.">By area</button>
+        <button data-arrange="time" aria-pressed="false"
+                title="Group by month: a stream of what has been happening.">By time</button>
+      </div>
+
+      <div class="nav-group">
+        <button class="icon-btn" id="back-btn" title="Back out one level (Escape)" aria-label="Back out one level">
+          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M10 3.5 5.5 8 10 12.5"/></svg>
+        </button>
+        <button class="icon-btn" id="fit-btn" title="Frame everything at this level" aria-label="Frame everything at this level">
+          <svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M2 5.5V2.5h3M14 5.5V2.5h-3M2 10.5v3h3M14 10.5v3h-3"/></svg>
+        </button>
+        <nav class="crumbs" id="crumbs" aria-label="Where you are"></nav>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="seg" id="seg-colour">
+        <button data-mode="level" aria-pressed="true">Level</button>
+        <button data-mode="freshness" aria-pressed="false">Freshness</button>
+      </div>
+      <label class="switch" for="labels-toggle">
+        <input type="checkbox" id="labels-toggle" checked>
+        <span>Names</span>
+      </label>
+      <label class="switch" for="motion-toggle" id="motion-row"
+             title="The map drifts very slightly and recent notes breathe. Turn it off for a still chart.">
+        <input type="checkbox" id="motion-toggle" checked>
+        <span>Motion</span>
+      </label>
+
+      <div class="search-wrap">
+        <label class="sr-only" for="search">Search notes</label>
+        <input type="search" id="search" placeholder="Search notes  /" autocomplete="off">
+        <div class="results" id="results" hidden role="listbox" aria-label="Search results"></div>
+      </div>
+    </div>
+
+    <svg id="graph" role="img" aria-label="Map of the team's memory, grouped so one level is shown at a time"></svg>
+
+    <p class="scope" id="scope"></p>
+    <div class="key" id="key"></div>
+    <div class="hovercard" id="hovercard" hidden></div>
+    <aside class="card" id="card" hidden aria-live="polite"></aside>
+
+    <footer class="legal">
+      <a href="privacy.html">Privacy</a>
+      <a href="terms.html">Terms</a>
+    </footer>
+  </section>
+
+  <aside class="rail">
+    <nav class="rail-tabs" role="tablist" aria-label="Views">
+      <button role="tab" data-panel="changes" aria-selected="true" aria-controls="panel-changes" id="tab-changes">Changes</button>
+      <button role="tab" data-panel="needs" aria-selected="false" aria-controls="panel-needs" id="tab-needs">Needs you<span class="count" id="needs-count"></span></button>
+      <button role="tab" data-panel="gaps" aria-selected="false" aria-controls="panel-gaps" id="tab-gaps">Gaps<span class="count" id="gaps-count"></span></button>
+      <button role="tab" data-panel="note" aria-selected="false" aria-controls="panel-note" id="tab-note">Note</button>
+    </nav>
+
+    <div class="rail-body">
+      <div class="panel on" id="panel-changes" role="tabpanel" aria-labelledby="tab-changes" tabindex="0">
+        <p class="panel-hint">Newest first. Select an entry to highlight the notes it touched.</p>
+        <ol class="feed" id="feed"></ol>
+      </div>
+
+      <div class="panel" id="panel-needs" role="tabpanel" aria-labelledby="tab-needs" tabindex="0" hidden>
+        <p class="panel-hint">Work waiting on a person. Ages are shown so a stalled item is visible.</p>
+        <div id="needs"></div>
+      </div>
+
+      <div class="panel" id="panel-gaps" role="tabpanel" aria-labelledby="tab-gaps" tabindex="0" hidden>
+        <div id="gaps"></div>
+      </div>
+
+      <div class="panel" id="panel-note" role="tabpanel" aria-labelledby="tab-note" tabindex="0" hidden>
+        <div id="detail"><p class="panel-hint">Select a note on the map to read it.</p></div>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<dialog id="help">
+  <article>
+    <h2>How to read this map</h2>
+    <p>Each circle is one note in the team's shared memory. Each line is a relation the note
+       declares, which is the same path an AI agent follows when it looks something up.</p>
+
+    <h3>Levels decide who may change a note</h3>
+    <ul id="help-levels"></ul>
+
+    <h3>Why you see groups first</h3>
+    <p>A pane this size fits roughly sixty labelled things before the names start colliding, and
+       that limit is about type, not about speed. So the map shows one depth at a time: the
+       groups, then one group opened, then one note with its neighbours drawn in around it.
+       Every group physically contains its notes, so going deeper is a move into a place rather
+       than a jump to another screen.</p>
+    <p><b>By area</b> groups notes by where they live, which is the shape of what the team knows.
+       <b>By time</b> groups them by month, which is the shape of what has been happening. Both
+       are the same corpus.</p>
+
+    <h3>What the marks mean</h3>
+    <ul>
+      <li>Circle size is how much a thing holds: facts for a note, notes for a group.</li>
+      <li>The bar under a group is its mix of levels.</li>
+      <li>A heavier line is a dependency: <code>depends_on</code>, <code>implements</code>,
+          <code>part_of</code>, <code>supersedes</code>. These are the paths a planning change
+          travels along.</li>
+      <li>A lighter line is <code>relates_to</code>, meaning see also. These deliberately do not
+          carry a change outward.</li>
+      <li>An amber ring means a planning change landed upstream and nobody has re-read the note
+          yet.</li>
+      <li>A note that changed in the last week breathes faintly.</li>
+    </ul>
+
+    <h3>Getting around</h3>
+    <ul>
+      <li>Select a group to open it, a note to bring it close.</li>
+      <li><kbd>Escape</kbd> or <kbd>Backspace</kbd> backs out one level. So does clicking empty space.</li>
+      <li><kbd>/</kbd> jumps to search, which reaches any note at any depth.</li>
+      <li>Every view has its own address, so a link you paste opens exactly what you were looking at.</li>
+    </ul>
+
+    <h3>Why most notes show only a summary line</h3>
+    <p id="help-redaction"></p>
+
+    <form method="dialog"><button class="btn close">Close</button></form>
+  </article>
+</dialog>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

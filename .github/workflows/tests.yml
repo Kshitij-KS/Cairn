@@ -1,0 +1,49 @@
+# The engine's own tests: guard, protocol (mem.py), parsers, atlas redaction, and the front end.
+# Separate from memory-gate.yml, which judges NOTES; this judges the CODE that judges notes.
+# Offline and keyless. Runs on any PR or push that touches the machinery.
+name: tests
+
+on:
+  # Every PR and every push to main: path filters left seven policy and executable roots untested
+  # (audit 10-F5), and the suite is cheap.
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Install front-end test deps (jsdom, d3) locally in web/test
+        run: cd web/test && npm ci --no-audit --no-fund
+      - name: Run every offline check
+        run: |
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "ci"
+          bash tools/run_tests.sh
+
+  windows-sync:
+    # Windows PowerShell 5.1 is preinstalled on GitHub's Windows runners, so the sync path the
+    # Windows dispatcher uses is tested on every change, not only by hand (audit 06-F2/F3/F13).
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Sync scenarios against sync-memory.ps1
+        shell: pwsh
+        run: |
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "ci"
+          python tools/test_sync.py --impl powershell

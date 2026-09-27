@@ -1,0 +1,14 @@
+---
+inclusion: always
+---
+
+# Team memory rules — project `__PROJECT_NAME__`
+
+Two Basic Memory projects serve this repo: **`__PROJECT_NAME__`** (`memory/`, project facts) and
+**`cairn`** (company-wide). The six mandatory rules, verbatim:
+
+#[[file:memory/AGENT-RULES.md]]
+
+Step-by-step loop: `/team-memory` skill. Sync hooks: `.kiro/hooks/memory-*.json` run
+`memory/scripts/sync-memory` (pull on SessionStart, commit + push of `memory/` on Stop).
+On a reported merge conflict, stop and tell the human which files. Never force-push.

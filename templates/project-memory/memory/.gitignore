@@ -1,0 +1,3 @@
+# mem.py's local cache, session ledgers and bundles. Per machine, never shared.
+.memory/
+__pycache__/

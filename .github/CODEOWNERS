@@ -1,0 +1,7 @@
+# Not generated yet: this is the Cairn template.
+#
+# Run `uv run -q --script scripts/init.py`; it records you as the owner in governance/roles.json and
+# writes this file from it (`* @your-login`). After changing owners later, regenerate it with
+# `uv run -q --script scripts/memory_guard.py codeowners --write`.
+#
+# A review rule that names nobody enforces nothing, so memory-gate refuses to pass until then.

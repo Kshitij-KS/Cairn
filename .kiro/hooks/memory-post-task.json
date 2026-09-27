@@ -1,0 +1,26 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "team-memory-significance",
+      "description": "Before the turn ends, check whether it produced something worth remembering (governance/SIGNIFICANCE.md). Deterministic: no model call, no token cost. Kiro cannot block a Stop, so the prompt arrives as context rather than as an instruction; it fires at most once per session.",
+      "trigger": "Stop",
+      "action": {
+        "type": "command",
+        "command": "uv run -q --script scripts/memory_guard.py significance --format text"
+      },
+      "timeout": 30
+    },
+    {
+      "name": "team-memory-push",
+      "description": "Stamp attribution from the git identity, enforce the level/role gate, then commit and push the changed notes. No-op when nothing changed. Stops with a clear message on merge conflict or policy violation; never force-pushes.",
+      "trigger": "Stop",
+      "action": {
+        "type": "command",
+        "command": "uv run -q --script scripts/sync-memory.py post --agent"
+      },
+      "timeout": 120,
+      "confirm": false
+    }
+  ]
+}

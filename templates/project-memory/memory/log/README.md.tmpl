@@ -1,0 +1,22 @@
+---
+title: __PROJECT_TITLE__ Log Folder Rules
+type: process
+permalink: log/readme
+tags: [log, process, __PROJECT_NAME__]
+---
+
+# log/ — the agents' inbox for __PROJECT_NAME__
+
+Agents write here freely: gotchas (`log/journal/YYYY-MM-DD-<slug>.md`, tag `gotcha`) and proposals
+(`log/proposals/PROPOSAL - <what>.md`, title `PROPOSAL - <what>`, tag `proposal`, target `context/…` or a new
+ADR). Durable content only; Basic Memory format; at least one relation to a `context/` note.
+Humans triage weekly and promote into `context/` or `decisions/` (process: cairn
+`log/README.md`). Never delete — set `status: promoted | rejected` on the proposal.
+
+## Observations
+- [rule] Agents write freely here; humans promote
+- [rule] Proposal titles use `PROPOSAL - ` (dash, not colon: Windows filenames)
+
+## Relations
+- relates_to [[__PROJECT_TITLE__ Overview]]
+- relates_to [[Log Folder Rules]]

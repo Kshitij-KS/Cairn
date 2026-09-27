@@ -1,0 +1,159 @@
+# Tier C — the summary floor. Every commit gets one line here, generated from git, so nothing
+# can be forgotten and nothing has to be remembered. This is what makes "only important things
+# are stored in detail" safe: the unimportant things are still traceable, just not elaborated.
+#
+# Line format:  YYYY-MM-DD HH:MM | level | author (agent) | N files (paths) | message
+#
+# Self-trigger guard, three layers:
+#   1. The commit is pushed with the default GITHUB_TOKEN, and GitHub never starts a `push`
+#      workflow for pushes made with GITHUB_TOKEN.
+#   2. The commit message carries [skip ci], which also suppresses push-triggered workflows
+#      (this matters only if someone later switches to a PAT or GitHub App token).
+#   3. The job is skipped when the actor is github-actions[bot], and commits that touch only
+#      the changelog are excluded from the range.
+name: changelog
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "log/CHANGELOG.md"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: memory-main-writer
+  cancel-in-progress: false
+
+jobs:
+  instance:
+    # The template repository has no owner yet (roles.json "instance": false), so the gates that
+    # need people, CODEOWNERS and a real policy would fail on every change for a reason no change
+    # can fix. They start the moment scripts/init.py marks the repository as an instance.
+    runs-on: ubuntu-latest
+    outputs:
+      instance: ${{ steps.read.outputs.instance }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          sparse-checkout: governance/roles.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - id: read
+        run: |
+          python3 -c 'import json; print("instance=" + ("true" if json.load(open("governance/roles.json")).get("instance") is True else "false"))' >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+  append:
+    needs: instance
+    if: github.actor != 'github-actions[bot]' && !contains(github.event.head_commit.message, '[skip ci]') && needs.instance.outputs.instance == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # need the full range github.event.before..github.sha
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Append entries
+        id: append
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          FORCED: ${{ github.event.forced }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, re, subprocess, sys
+
+          FILE = "log/CHANGELOG.md"
+          if not os.path.exists(FILE):
+              os.makedirs("log", exist_ok=True)
+              open(FILE, "w", encoding="utf-8").write(
+                  "---\ntitle: Changelog\ntype: changelog\npermalink: log/changelog\n"
+                  "level: L3\nconfidentiality: internal\ntags: [changelog, generated]\n---\n\n"
+                  "# cairn change log\n\n## Entries\n\n")
+
+          policy = json.load(open("governance/roles.json"))
+          rules = policy["paths"]["rules"]
+          default_level = policy["paths"].get("default", "L0")
+          order = ["L0", "L1", "L2", "L3"]
+
+          def g2re(p):
+              out, i = [], 0
+              while i < len(p):
+                  if p.startswith("**/", i): out.append("(?:.*/)?"); i += 3
+                  elif p.startswith("**", i): out.append(".*"); i += 2
+                  elif p[i] == "*": out.append("[^/]*"); i += 1
+                  elif p[i] == "?": out.append("[^/]"); i += 1
+                  else: out.append(re.escape(p[i])); i += 1
+              return re.compile("^" + "".join(out) + "$")
+
+          compiled = [(g2re(r["glob"]), r["level"]) for r in rules]
+
+          def level_of(path):
+              for rx, lvl in compiled:
+                  if rx.match(path):
+                      return lvl
+              return default_level
+
+          def sh(*a):
+              return subprocess.run(a, capture_output=True, text=True).stdout
+
+          before, after, forced = os.environ["BEFORE"], os.environ["AFTER"], os.environ.get("FORCED")
+          zero = "0" * 40
+          ok = before and before != zero and forced != "true" and \
+              subprocess.run(["git", "cat-file", "-e", before + "^{commit}"]).returncode == 0
+          rng = [before + ".." + after] if ok else [after, "-1"]
+
+          shas = sh("git", "rev-list", "--reverse", "--no-merges", *rng).split()
+          added = 0
+          with open(FILE, "a", encoding="utf-8") as out:
+              for sha in shas:
+                  msg = sh("git", "log", "-1", "--format=%s", sha).strip()
+                  if "[skip ci]" in msg:
+                      continue
+                  files = [f for f in sh("git", "diff-tree", "--no-commit-id", "--name-only",
+                                         "-r", sha).split("\n")
+                           if f.strip() and f != "log/CHANGELOG.md"]
+                  if not files:
+                      continue
+                  lvl = "L0"
+                  for f in files:
+                      L = level_of(f)
+                      if L in order and order.index(L) > order.index(lvl):
+                          lvl = L
+                  when = sh("git", "log", "-1", "--date=format-local:%Y-%m-%d %H:%M",
+                            "--format=%ad", sha).strip()
+                  who = sh("git", "log", "-1", "--format=%an", sha).strip()
+                  body = sh("git", "log", "-1", "--format=%b", sha)
+                  m = re.search(r"Sync-Agent:\s*(\S+)", body)
+                  if m and m.group(1) != "unknown":
+                      who += " (%s)" % m.group(1)
+                  paths = ", ".join(files[:4])
+                  if len(files) > 4:
+                      paths += ", +%d more" % (len(files) - 4)
+                  clean = lambda s: s.replace("|", "¦").replace("\n", " ")
+                  out.write("%s | %s | %s | %d files (%s) | %s\n" % (
+                      when, lvl, clean(who), len(files), clean(paths), clean(msg)[:200]))
+                  added += 1
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              fh.write("added=%d\n" % added)
+          print("appended %d line(s)" % added)
+          PY
+
+      - name: Commit and push
+        if: steps.append.outputs.added != '0'
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add log/CHANGELOG.md
+          git commit -m "chore(log): changelog +${{ steps.append.outputs.added }} [skip ci]"
+          git pull --rebase --quiet origin "${GITHUB_REF_NAME}" || { echo "::error::rebase conflict on CHANGELOG.md - fix by hand"; exit 1; }
+          git push origin "HEAD:${GITHUB_REF_NAME}"

@@ -1,0 +1,48 @@
+---
+title: __PROJECT_TITLE__ Agent Rules
+type: instructions
+permalink: agent-rules
+tags: [agents, rules, __PROJECT_NAME__]
+---
+
+# Memory rules for agents working in __PROJECT_NAME__
+
+Two memory tiers are served by the Basic Memory MCP server: project **`__PROJECT_NAME__`**
+(this repo's `memory/`) and **`cairn`** (company-wide). These six rules are mandatory.
+
+1. **BEFORE any task** — run
+   `uv run -q --script memory/scripts/mem.py load "<the ask>" --touching <file>...` from the repo
+   root. It loads this project's `CORE.md` and feature map, resolves the feature, picks a mode and
+   loads the neighbourhood by direction. Read the bundle file it names; post the receipt's first
+   line; exit 2 = ask the person which feature, re-run with `--feature`. Company-wide canon is in
+   `cairn` (run the same command there, or `search_notes` with `search_all_projects: true`).
+   If `mem.py` cannot run: `search_notes` + `read_note` on `CORE.md`, `features/`, `context/`,
+   accepted ADRs, and post `Memory: read <n> notes — <fact>; <fact>; <ADR or "no ADR">.`
+2. **TRUST ORDER** — `decisions/` (accepted) > `CORE.md`, `features/`, `context/` > `projects/` > `log/`. Across tiers,
+   the tier that owns the scope wins (project fact → this memory; company fact → cairn).
+   Contradiction → flag it to the human in one line naming both notes; never pick silently.
+3. **AFTER work — durable only** — a new/changed decision, an architecture change, a non-obvious
+   gotcha, a changed owner/vendor. Never task chatter, progress notes, or anything re-derivable
+   from code or git. Nothing durable → write nothing.
+4. **WRITE TARGETS** — `memory/log/` freely (`write_note` with `project: "__PROJECT_NAME__"`,
+   `directory: "log"`). `memory/context/` and `memory/decisions/` are **propose-only**: write a
+   `log/` note titled `PROPOSAL - <what>` tagged `proposal`; a human promotes it. Company-wide
+   facts → propose in cairn's `log/` instead (`project: "cairn"`). `features/` and
+   `CORE.md` are propose-only too (`mem remember "<fact>" --feature "<name>"` writes the proposal);
+   `trials/`, `evals/` and `log/gaps/` are free. Changed code a feature `covers:`? Update that
+   feature note in the same change; the guard warns `WRITEBACK` if you do not.
+5. **FORMAT** — Basic Memory format: frontmatter (`title`, `type`, `tags`), summary paragraph,
+   `## Observations` (`- [category] fact`), `## Relations` with at least one single-token relation
+   (`relates_to [[__PROJECT_TITLE__ Overview]]`, `part_of`, `depends_on`, `implements`, …).
+6. **NEVER store** — credentials, API keys, tokens, connection strings, customer PII, salaries,
+   private-DM content. Reference the source by name; leave the value out.
+
+Sync: `memory/scripts/sync-memory.*` runs as hooks (pull on session start, commit + push of
+`memory/` on stop). On a reported merge conflict, stop and tell the human which files.
+
+## Observations
+- [rule] Load context with mem load (core, then the feature neighbourhood) before working; write only durable learnings after
+- [rule] `memory/log/` is the only agent-writable folder in this tier
+
+## Relations
+- relates_to [[__PROJECT_TITLE__ Memory]]

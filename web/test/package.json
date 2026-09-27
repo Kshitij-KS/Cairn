@@ -1,0 +1,11 @@
+{
+  "name": "atlas-ui-tests",
+  "private": true,
+  "type": "module",
+  "description": "Headless checks for the Memory Atlas front end. jsdom has no layout engine and no SVG geometry, so harness.mjs stubs what the app touches; every stub is documented there as a deliberate lie.",
+  "scripts": {
+    "test": "node suite.mjs && node negative.mjs",
+    "shots": "node shoot.mjs"
+  },
+  "dependencies": { "d3": "^7.9.0", "jsdom": "^24.0.0" }
+}

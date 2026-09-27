@@ -1,0 +1,480 @@
+{
+  "$comment": "THE single source of truth for who may change what. Read by scripts/memory_guard.py (local pre-commit AND CI). Two independent axes: LEVEL (what kind of knowledge — decides who may change it and whether the change cascades) and TIER (how significant — decides whether it is worth storing at all, and in how much detail). Editing this file requires the `owner` role plus a CODEOWNERS review. JSON, not YAML, so it parses with the standard library on every machine with zero dependencies.",
+  "schema": 2,
+  "org": "__ORG__",
+  "repo": "__REPO__",
+  "enforcement": {
+    "$comment": "mode=direct: agents commit and push straight to the default branch (correct before branch protection exists). mode=pr: the intended mode once main is protected, where every change arrives as a pull request. The sync scripts do not read this field yet, and memory-gate.yml does not auto-merge; auto_merge_levels is reserved for that. Switch to `pr` the day you enable branch protection on main.",
+    "mode": "direct",
+    "auto_merge_levels": [],
+    "block_on_warning": false,
+    "$comment_containment": "2026-09-25 audit containment: L0 auto-merge is paused (empty list) until the gate runs from the trusted base revision and has been exercised on GitHub."
+  },
+  "levels": {
+    "$comment": "The core of the model. A note declares its level in frontmatter (`level: L0`). The guard also infers the level from the path and FAILS if the declaration and the path disagree — so a note cannot smuggle strategy into the code tier.",
+    "L0": {
+      "label": "observation",
+      "what": "How the system actually behaves right now. Code-level facts, non-obvious gotchas, environment quirks, 'we tried X and it failed because Y', a component's real responsibility, a corrected assumption.",
+      "examples": [
+        "the nightly export runs in UTC, not local time, so dates near midnight shift a day",
+        "uv tool install basic-memory fails on Python < 3.12; pass --python 3.12",
+        "Kiro ignores symlinked skills, so the copies must be regenerated"
+      ],
+      "may_change": [
+        "agent",
+        "contributor"
+      ],
+      "paths": [
+        "log/journal/**",
+        "projects/**",
+        "trials/**",
+        "evals/**"
+      ],
+      "review": "none",
+      "cascade": "none",
+      "storage": "written automatically, attributed, auto-merged"
+    },
+    "L1": {
+      "label": "project-planning",
+      "what": "How ONE project is planned and built: its scope, milestones, sequencing, project-level architecture and the decisions behind it.",
+      "examples": [
+        "the product stores uploads in object storage, not on the app servers (a decision record)",
+        "Single sign-on is P0 and passing the security review is its exit criterion",
+        "The export step lives in export.py; legacy_export.py is superseded"
+      ],
+      "may_change": [
+        "maintainer",
+        "steward",
+        "owner"
+      ],
+      "paths": [
+        "features/**",
+        "<project-repo>/memory/features/**",
+        "<project-repo>/memory/context/**",
+        "<project-repo>/memory/decisions/**"
+      ],
+      "review": "one maintainer of that project",
+      "cascade": "that project's notes",
+      "storage": "full note with rationale, reviewed before merge"
+    },
+    "L2": {
+      "label": "ideation-and-strategy",
+      "what": "What we are building and why, across projects. Product thesis, company architecture, vendor and tooling strategy, conventions everyone follows, ownership. The ideological layer: changing it changes how every project should think.",
+      "examples": [
+        "Background jobs run in the cheapest region that meets the latency target",
+        "One cloud provider is the platform of record; a second is priced as a hedge, not planned",
+        "Support response time is a product promise, not a cost line"
+      ],
+      "may_change": [
+        "steward",
+        "owner"
+      ],
+      "paths": [
+        "CORE.md",
+        "ARCHITECTURE.md",
+        "context/**",
+        "decisions/**",
+        "templates/**"
+      ],
+      "review": "one steward who is not the author",
+      "cascade": "every project",
+      "storage": "full note with rationale and alternatives, reviewed before merge"
+    },
+    "L3": {
+      "label": "governance",
+      "what": "The rules of the memory system itself: roles, access, the agent rulebook, hooks, CI, the scripts hooks execute.",
+      "examples": [
+        "Who may promote into context/",
+        "What the Stop hook runs on every teammate's machine",
+        "The significance rubric itself"
+      ],
+      "may_change": [
+        "owner"
+      ],
+      "paths": [
+        "governance/**",
+        ".github/**",
+        ".claude/**",
+        ".kiro/**",
+        ".cursor/**",
+        ".agents/**",
+        "scripts/**",
+        "CLAUDE.md"
+      ],
+      "review": "one owner who is not the author",
+      "cascade": "every project",
+      "storage": "ADR required for any rule change"
+    }
+  },
+  "cascade": {
+    "$comment": "What 'a planning change updates the entire context' means mechanically. When a note at L1/L2/L3 changes, scripts/memory_guard.py walks the RELATION GRAPH (the [[wikilinks]] in ## Relations) outward from it and stamps every dependent note with `review_needed`. Agents that later read a stamped note must say so in their one-line memory report and prefer the changed note. A steward clears the stamp by re-reading the dependent and removing the field, or by updating it.",
+    "enabled": true,
+    "depth": 1,
+    "stamp_field": "review_needed",
+    "$relation_comment": "Only DEPENDENCY relations cascade. `relates_to` is deliberately absent: it means 'see also', every note has several, and following it flagged every note in testing — a review list that includes everything is a review list nobody works. If a note genuinely depends on another, say `depends_on` or `implements`.",
+    "relation_types_followed": [
+      "implements",
+      "depends_on",
+      "part_of",
+      "supersedes"
+    ],
+    "max_stamped": 8,
+    "$max_comment": "Above this, the change is too central to review note-by-note: the cascade reports the set and asks a human to scope it rather than stamping everything.",
+    "opens_issue": true,
+    "issue_label": "memory-cascade"
+  },
+  "people": {
+    "$comment": "handle = the short id used in a note's `author:` frontmatter. function (pm | eng | design | ops) only picks an agent's STARTING context mode; the ask always overrides it. restricted_read allows an agent acting for this person to load confidentiality:restricted notes; the real fence is still GitHub access to the restricted submodule. email MUST match that person's `git config user.email`, or the guard cannot stamp attribution for them. github = their GitHub login, used by CODEOWNERS and the CI attribution check. A person's role is their MAXIMUM; `projects` narrows where a maintainer's L1 rights apply.",
+    "__OWNER__": {
+      "name": "",
+      "email": "",
+      "github": "",
+      "role": "owner",
+      "projects": [
+        "*"
+      ],
+      "function": "eng",
+      "restricted_read": true
+    },
+    "__TODO_PERSON_2__": {
+      "name": "",
+      "email": "",
+      "github": "",
+      "role": "steward",
+      "projects": [
+        "*"
+      ]
+    },
+    "__TODO_PERSON_3__": {
+      "name": "",
+      "email": "",
+      "github": "",
+      "role": "maintainer",
+      "projects": [
+        "my-app"
+      ]
+    },
+    "__TODO_PERSON_4__": {
+      "name": "",
+      "email": "",
+      "github": "",
+      "role": "contributor",
+      "projects": []
+    },
+    "__TODO_PERSON_5__": {
+      "name": "",
+      "email": "",
+      "github": "",
+      "role": "contributor",
+      "projects": []
+    }
+  },
+  "roles": {
+    "$comment": "Ordered least to most privileged; each inherits the one before it. `agent` is not a person — it is the capability an AI agent runs with, deliberately the narrowest, regardless of who is driving it. An owner driving Claude Code still writes as `agent` for that turn: the human's rights apply when the human commits, not when their agent does.",
+    "order": [
+      "agent",
+      "reader",
+      "contributor",
+      "maintainer",
+      "steward",
+      "owner"
+    ],
+    "agent": {
+      "max_level": "L0",
+      "may_propose_up_to": "L3",
+      "description": "Any AI agent. Records observations; may never change canon, only propose."
+    },
+    "reader": {
+      "max_level": null,
+      "may_propose_up_to": null,
+      "description": "Read-only access to every tier except `restricted`."
+    },
+    "contributor": {
+      "max_level": "L0",
+      "may_propose_up_to": "L3",
+      "description": "Every engineer. Writes observations freely; proposes everything above."
+    },
+    "maintainer": {
+      "max_level": "L1",
+      "may_propose_up_to": "L3",
+      "description": "Owns named projects; changes planning for those projects only."
+    },
+    "steward": {
+      "max_level": "L2",
+      "may_propose_up_to": "L3",
+      "description": "Custodian of company canon: strategy, architecture, conventions."
+    },
+    "owner": {
+      "max_level": "L3",
+      "may_propose_up_to": "L3",
+      "description": "May change the rules themselves. Smallest group: these paths execute code on every teammate's machine."
+    }
+  },
+  "paths": {
+    "$comment": "Level of each path. First match wins, most specific first. `bot` means only the GitHub Action identity writes it. Unlisted paths fall through to `default`.",
+    "rules": [
+      {
+        "glob": "governance/**",
+        "level": "L3",
+        "reason": "changing the rules is the highest privilege in the system"
+      },
+      {
+        "glob": ".github/**",
+        "level": "L3",
+        "reason": "CI runs with a write token"
+      },
+      {
+        "glob": "web/data/**",
+        "level": "bot",
+        "reason": "the published map is generated by CI from the notes; a hand edit would publish whatever it says (audit 10-F10)"
+      },
+      {
+        "glob": "web/**",
+        "level": "L3",
+        "reason": "the public site: what anyone with the link sees"
+      },
+      {
+        "glob": "tools/**",
+        "level": "L3",
+        "reason": "the tests that prove the guard works; weakening them weakens every gate"
+      },
+      {
+        "glob": "CODEOWNERS",
+        "level": "L3",
+        "reason": "who must review what"
+      },
+      {
+        "glob": "vercel.json",
+        "level": "L3",
+        "reason": "deployment configuration"
+      },
+      {
+        "glob": ".claude/skills/**",
+        "level": "derived",
+        "derived_from": ".agents/skills/",
+        "strip_prefix": ".claude/skills/",
+        "reason": "a generated copy of the canonical skill: allowed only while it is byte-identical to it"
+      },
+      {
+        "glob": ".kiro/skills/**",
+        "level": "derived",
+        "derived_from": ".agents/skills/",
+        "strip_prefix": ".kiro/skills/",
+        "reason": "a generated copy of the canonical skill: allowed only while it is byte-identical to it"
+      },
+      {
+        "glob": ".claude/**",
+        "level": "L3",
+        "reason": "hooks execute commands on every teammate's machine at session start"
+      },
+      {
+        "glob": ".kiro/**",
+        "level": "L3",
+        "reason": "same: hooks execute commands"
+      },
+      {
+        "glob": ".cursor/**",
+        "level": "L3",
+        "reason": "rules are instructions to every agent"
+      },
+      {
+        "glob": ".agents/**",
+        "level": "L3",
+        "reason": "the skill is an instruction to every agent"
+      },
+      {
+        "glob": "scripts/**",
+        "level": "L3",
+        "reason": "hooks invoke these scripts"
+      },
+      {
+        "glob": "CLAUDE.md",
+        "level": "L3",
+        "reason": "the agent rulebook"
+      },
+      {
+        "glob": "CORE.md",
+        "level": "L2",
+        "reason": "the big picture every agent reads first: owner-curated, size-capped"
+      },
+      {
+        "glob": "ARCHITECTURE.md",
+        "level": "L2",
+        "reason": "the system's own description, handed to auditors"
+      },
+      {
+        "glob": "features/**",
+        "level": "L1",
+        "reason": "the feature spine agents navigate by: what each part is, owns and promises"
+      },
+      {
+        "glob": "trials/**",
+        "level": "L0",
+        "reason": "anyone may open a trial; KEEPING one is governed by the level of what it changes"
+      },
+      {
+        "glob": "evals/**",
+        "level": "L0",
+        "reason": "retrieval tests: adding a test grants nothing"
+      },
+      {
+        "glob": "templates/**",
+        "level": "L2",
+        "reason": "seeds every new project's memory"
+      },
+      {
+        "glob": "README.md",
+        "level": "L2",
+        "reason": "the onboarding contract"
+      },
+      {
+        "glob": "RUNBOOK.md",
+        "level": "L2",
+        "reason": "the setup sequence everyone follows"
+      },
+      {
+        "glob": "log/CHANGELOG.md",
+        "level": "L3",
+        "reason": "machine-appended by CI; hand edits are overwritten, so only an owner may seed or reset it"
+      },
+      {
+        "glob": "log/journal/**",
+        "level": "L0",
+        "reason": "the agents' inbox — the one place writes are free"
+      },
+      {
+        "glob": "log/proposals/**",
+        "level": "L0",
+        "reason": "proposals are how agents and contributors reach canon"
+      },
+      {
+        "glob": "log/**",
+        "level": "L0",
+        "reason": "other log files are observations"
+      },
+      {
+        "glob": "projects/**",
+        "level": "L0",
+        "reason": "dated status, not canon — the plan itself is L1/L2"
+      },
+      {
+        "glob": "context/restricted/**",
+        "level": "L2",
+        "reason": "see sensitivity.restricted"
+      },
+      {
+        "glob": "decisions/**",
+        "level": "L2",
+        "reason": "ADRs are canon: accepted ones outrank everything"
+      },
+      {
+        "glob": "context/**",
+        "level": "L2",
+        "reason": "company canon"
+      }
+    ],
+    "default": "L0"
+  },
+  "sensitivity": {
+    "$comment": "Declared per note as `confidentiality:` in frontmatter. The guard enforces that a note's declared tier matches where it lives.",
+    "default": "internal",
+    "tiers": {
+      "open": {
+        "description": "Safe to share outside the company.",
+        "allowed_paths": [
+          "**"
+        ]
+      },
+      "internal": {
+        "description": "Default. Visible to everyone with access to this private repo; agents read it freely.",
+        "allowed_paths": [
+          "**"
+        ]
+      },
+      "restricted": {
+        "description": "Commercially or legally sensitive: unsigned contract terms, security findings, anything under NDA that the whole team is not cleared for. NOT stored in this repo. It lives in a separate private repo mounted at context/restricted/ as a git submodule, so access is a GitHub repository permission — the only access control here that is genuinely enforced rather than merely requested. Teammates without access do not receive the files, and their Basic Memory indexes nothing there.",
+        "allowed_paths": [
+          "context/restricted/**"
+        ],
+        "submodule": "__ORG__/__REPO__-restricted"
+      }
+    },
+    "never_store": {
+      "$comment": "Not a tier. These never enter any repo, at any sensitivity, at any level. The guard blocks them by pattern and CI re-checks.",
+      "items": [
+        "credentials",
+        "API keys",
+        "tokens",
+        "connection strings",
+        "customer PII",
+        "salaries or compensation",
+        "private DM content"
+      ]
+    }
+  },
+  "protocol": {
+    "$comment": "How agents load context (ADR-004). Read by scripts/mem.py. Order: who -> core -> resolve -> mode scope -> receipt -> plan -> execute -> write back. Scope is DIRECTIONAL: upstream = what a note relies on (its dependency edges), downstream = what relies on it. Undirected traversal is never used: at 3,020 notes, 3 hops of any link reached p95 333 notes; 2 directed hops stayed at p95 8-12.",
+    "default_ref": "main@HEAD",
+    "upstream_hops": 2,
+    "downstream_hops": 2,
+    "card_max_words": 150,
+    "debug_journal_days": 30,
+    "plan_recent_days": 14,
+    "moved_check_every_seconds": 300,
+    "core_max_tokens": 3000,
+    "extra_symptoms": [],
+    "$comment_extra_symptoms": "Regular expressions for how bug reports in YOUR domain describe a symptom, added to mem.py's generic list (has no, missing, wrong, stuck, times out, too slow, ...). An ask with no intent word that matches one is read as debug. Example for a web app: [\"\\\\bspins forever\\\\b\", \"\\\\b404\\\\b\", \"\\\\blogged out\\\\b\"].",
+    "code_root": ".",
+    "$comment_code_root": "where features' covers: globs resolve, relative to the repo root. '.' = this repo (cairn's features cover its own scripts). MEMORY_CODE_ROOT overrides it."
+  },
+  "publication": {
+    "$comment": "What the PUBLIC build of web/ may show. Separate from `sensitivity` because that governs the repository and this governs a URL anyone with the link can open. A note's one-line summary is the first sentence of the note, which for a strategy note is the strategy: publishing it undoes the redaction it sits beside. So summaries are published only for the levels listed here, plus any note explicitly marked `confidentiality: open`.",
+    "brief_levels": [
+      "L0"
+    ],
+    "publish_commit_messages": false,
+    "publish_authors": true
+  },
+  "significance": {
+    "$comment": "The SECOND, independent axis: is this worth storing at all, and in how much detail? Level answers WHO and WHERE; significance answers WHETHER. Full rubric with worked examples: governance/SIGNIFICANCE.md.",
+    "tiers": {
+      "A": {
+        "label": "decision",
+        "stored": "full note with rationale and alternatives",
+        "levels": [
+          "L1",
+          "L2",
+          "L3"
+        ],
+        "requires_review": true
+      },
+      "B": {
+        "label": "signal",
+        "stored": "short attributed note",
+        "levels": [
+          "L0"
+        ],
+        "requires_review": false
+      },
+      "C": {
+        "label": "summary",
+        "stored": "one changelog line",
+        "levels": [
+          "bot"
+        ],
+        "requires_review": false
+      },
+      "D": {
+        "label": "discard",
+        "stored": "nothing",
+        "levels": [],
+        "requires_review": false
+      }
+    },
+    "journal_max_lines": 80,
+    "duplicate_similarity_threshold": 0.85,
+    "duplicate_lookback_days": 30
+  },
+  "instance": false,
+  "$comment_instance": "false in the Cairn template. `scripts/init.py` fills in the owner and sets this true; the memory-gate, cascade, changelog and atlas workflows only run on an initialized instance."
+}

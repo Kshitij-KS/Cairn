@@ -1,0 +1,43 @@
+---
+title: __PROJECT_TITLE__ Memory
+type: readme
+permalink: readme
+tags: [project-memory, __PROJECT_NAME__]
+---
+
+# __PROJECT_TITLE__ — project memory
+
+This folder is the **project tier** of the team's AI-agent memory: everything an agent needs to
+know about `__PROJECT_NAME__` that is *not* a company-wide fact. Company-wide facts (who we are,
+vendors, roles, company conventions, cross-project ADRs) live in **cairn** (Basic Memory
+project `cairn`). Both are Markdown, both are indexed by Basic Memory, both sync through git.
+
+Created __DATE__ from `cairn/templates/project-memory`.
+
+## Layout
+
+| Folder | Holds | Agents may |
+|---|---|---|
+| `context/` | overview, architecture, conventions, glossary of THIS project | propose only |
+| `decisions/` | project-scoped ADRs | propose only |
+| `log/` | gotchas, learnings, `PROPOSAL - …` notes | write freely |
+| `scripts/` | `sync-memory.{sh,ps1,py}` — pull before, commit+push after (hooks) | — |
+
+## Trust order
+`decisions/` (accepted) > `context/` > `log/` inside this tier. Across tiers, **scope wins**: a
+project fact here beats a stale mention in cairn; a company fact in cairn beats a
+project note that contradicts it. Contradiction → flag to the human, never pick silently.
+
+## Rules
+The six agent rules are in `AGENT-RULES.md` (imported by the repo's `CLAUDE.md`, mirrored in
+`.cursor/rules/memory.mdc` and `.kiro/steering/memory.md`). The step-by-step loop is the
+`team-memory` skill.
+
+## Observations
+- [fact] Basic Memory project name: `__PROJECT_NAME__`, rooted at `<repo>/memory/`
+- [rule] Company-wide facts go to cairn, not here
+- [rule] Agents write to `log/` only; humans promote into `context/` and `decisions/`
+
+## Relations
+- relates_to [[__PROJECT_TITLE__ Overview]]
+- relates_to [[__PROJECT_TITLE__ Architecture]]

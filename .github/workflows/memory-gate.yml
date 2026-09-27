@@ -1,0 +1,128 @@
+# The gate for every pull request.
+#
+# 2026-09 audit (10-F1, 10-F3, 10-F4, 10-F8): the old gate ran the PR's OWN guard, policy,
+# classifier and tests, so one PR could replace all four and pass itself. Now:
+#   - the TRUSTED base revision is checked out separately and its code judges the PR,
+#   - the PR is checked out only as data (never executed by the gate job),
+#   - policy comes from the base revision (MEMORY_POLICY_REF), plus a floor no policy can lower,
+#   - the base's security tests are run against the PR's guard, so a PR cannot weaken the guard
+#     without this job going red,
+#   - routing runs in a separate job that executes no PR code and fails if labelling fails,
+#   - nothing auto-merges (containment until this gate has been exercised on GitHub).
+#   - secrets: the guard's SECRET-FILE / SECRET-CONTENT scan runs on every file in the range. The
+#     gitleaks action was removed because it scans the workspace root, which is no longer the PR.
+#
+# Access itself is enforced by required review: .github/CODEOWNERS (generated from roles.json)
+# plus branch protection on main requiring Code Owner review and this check.
+name: memory-gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: memory-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  instance:
+    # The template repository has no owner yet (roles.json "instance": false), so the gates that
+    # need people, CODEOWNERS and a real policy would fail on every change for a reason no change
+    # can fix. They start the moment scripts/init.py marks the repository as an instance.
+    runs-on: ubuntu-latest
+    outputs:
+      instance: ${{ steps.read.outputs.instance }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          sparse-checkout: governance/roles.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - id: read
+        run: |
+          python3 -c 'import json; print("instance=" + ("true" if json.load(open("governance/roles.json")).get("instance") is True else "false"))' >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+  gate:
+    needs: instance
+    if: needs.instance.outputs.instance == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      level: ${{ steps.classify.outputs.level }}
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      MEMORY_POLICY_REF: ${{ github.event.pull_request.base.sha }}
+      MEMORY_ACTOR_KIND: human
+    steps:
+      - name: Check out the trusted base revision (its code judges the PR)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+
+      - name: Check out the PR as data
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: head
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Safety, format and per-commit attribution (base guard, base policy, PR data)
+        run: |
+          set -euo pipefail
+          python base/scripts/memory_guard.py --notes-root head \
+            check --range "$BASE_SHA...$HEAD_SHA" --policy-ref "$BASE_SHA" --no-access
+
+      - name: The base revision's security tests, run against the PR's guard
+        env:
+          MEMORY_GUARD_UNDER_TEST: ${{ github.workspace }}/head/scripts/memory_guard.py
+        run: |
+          set -euo pipefail
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "ci"
+          python base/tools/test_security.py
+
+      - name: CODEOWNERS is generated from the trusted policy and names real people
+        run: python base/scripts/memory_guard.py --notes-root head codeowners
+
+      - name: Classify the level this PR needs (trusted policy + floor, both sides of renames)
+        id: classify
+        run: |
+          set -euo pipefail
+          LEVEL=$(python base/scripts/memory_guard.py --notes-root head \
+            classify --range "$BASE_SHA...$HEAD_SHA" --policy-ref "$BASE_SHA")
+          case "$LEVEL" in L0|L1|L2|L3) ;; *) echo "::error::classifier returned '$LEVEL'"; exit 1 ;; esac
+          echo "level=$LEVEL" >> "$GITHUB_OUTPUT"
+          echo "This pull request needs $LEVEL review."
+
+  route:
+    # Executes no PR-controlled code: it only reads the gate's output and calls the GitHub API.
+    needs: gate
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      LEVEL: ${{ needs.gate.outputs.level }}
+    steps:
+      - name: Label and route (fails if labelling fails)
+        run: |
+          set -euo pipefail
+          gh label create "memory:$LEVEL" --color BFD4F2 --force
+          gh label create "needs-review" --color D93F0B --force
+          gh pr edit "$PR" --add-label "memory:$LEVEL" --add-label "needs-review"
+          echo "Containment: no auto-merge. Every PR waits for its CODEOWNERS review."

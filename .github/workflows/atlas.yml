@@ -1,0 +1,81 @@
+# Rebuilds the published map. Run by hand for now (see the trigger below); with the push trigger
+# restored, the site is never staler than the last merge. The generator refuses to write a public file if any note lacks a confidentiality
+# marking, which is what stops an unlabelled note reaching a public URL.
+name: atlas
+
+on:
+  # CONTAINMENT (2026-09 audit, 07-F1..F4): automatic publication is paused. Run by hand only after
+  # the closed-schema verifier passes on your notes. To resume, restore the push trigger.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: memory-main-writer
+  cancel-in-progress: false
+
+jobs:
+  instance:
+    # The template repository has no owner yet (roles.json "instance": false), so the gates that
+    # need people, CODEOWNERS and a real policy would fail on every change for a reason no change
+    # can fix. They start the moment scripts/init.py marks the repository as an instance.
+    runs-on: ubuntu-latest
+    outputs:
+      instance: ${{ steps.read.outputs.instance }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          sparse-checkout: governance/roles.json
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - id: read
+        run: |
+          python3 -c 'import json; print("instance=" + ("true" if json.load(open("governance/roles.json")).get("instance") is True else "false"))' >> "$GITHUB_OUTPUT"
+          cat "$GITHUB_OUTPUT"
+
+  build:
+    needs: instance
+    if: github.actor != 'github-actions[bot]' && needs.instance.outputs.instance == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the activity feed reads git history
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Redaction regression tests must pass before anything is published (07-F8)
+        run: |
+          git config --global user.email "ci@example.invalid"
+          git config --global user.name "ci"
+          python tools/test_atlas.py
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Rendered-page privacy tests (jsdom, pinned by package-lock.json)
+        run: cd web/test && npm ci --no-audit --no-fund && npm test
+
+      - name: Generate the published map
+        run: python scripts/build_atlas.py --out web/data/graph.json
+
+      - name: Fail if anything withheld reached the public file
+        # every rule lives in build_atlas.verify_public, proven able to fail by tools/test_atlas.py
+        # closed schema + canonical rebuild comparison (build_atlas.verify_public)
+        run: python scripts/build_atlas.py --verify web/data/graph.json --against-source
+
+      - name: Commit the regenerated map
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/data/graph.json
+          git diff --cached --quiet && { echo "map unchanged"; exit 0; }
+          git commit -m "chore(atlas): rebuild map [skip ci]"
+          git pull --rebase --quiet origin "${GITHUB_REF_NAME}" || { echo "::error::rebase conflict on the map"; exit 1; }
+          git push origin "HEAD:${GITHUB_REF_NAME}"

@@ -1,0 +1,10 @@
+{
+  "$comment": "cairn manifest read by scripts/sync-memory.* — NOT a Basic Memory config file. Basic Memory keeps its own config in ~/.basic-memory/config.json; the sync script registers this folder there as project `name` (basic-memory project add <name> <path>).",
+  "schema": 1,
+  "name": "cairn",
+  "kind": "team",
+  "notes_root": ".",
+  "memory_paths": ["context", "decisions", "projects", "log"],
+  "skill_canonical": ".agents/skills/team-memory/SKILL.md",
+  "skill_copies": [".claude/skills/team-memory/SKILL.md", ".kiro/skills/team-memory/SKILL.md"]
+}
