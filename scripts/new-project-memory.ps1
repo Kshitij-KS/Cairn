@@ -46,7 +46,12 @@ function Render([string]$src, [string]$dest) {
   $created.Add((Rel $dest))
 }
 function RenderOrSuggest([string]$src, [string]$dest) {
-  if (Test-Path $dest) { Render $src "$dest.team-memory.suggested"; $suggested.Add((Rel $dest)) } else { Render $src $dest }
+  if (Test-Path $dest) {
+    # already exactly what we would write (a re-run): nothing to merge
+    $want = [System.IO.File]::ReadAllText($src).Replace('__PROJECT_NAME__', $Name).Replace('__PROJECT_TITLE__', $Title).Replace('__DATE__', $Date)
+    if ($want -ceq [System.IO.File]::ReadAllText($dest)) { $skipped.Add((Rel $dest)); return }
+    Render $src "$dest.team-memory.suggested"; $suggested.Add((Rel $dest))
+  } else { Render $src $dest }
 }
 
 # 1. memory/ notes + manifest
@@ -77,6 +82,39 @@ RenderOrSuggest (Join-Path $cc 'kiro-mcp.json.tmpl')                (Join-Path $
 RenderOrSuggest (Join-Path $cc 'mcp.json.tmpl')                     (Join-Path $Target '.mcp.json')
 RenderOrSuggest (Join-Path $cc 'cursor-mcp.json.tmpl')              (Join-Path $Target '.cursor\mcp.json')
 RenderOrSuggest (Join-Path $cc 'claude-settings.json.tmpl')         (Join-Path $Target '.claude\settings.json')
+# 3b. the gate on GitHub: a memory-gate workflow scoped to memory/, and the memory block of
+#     CODEOWNERS (the product's own code owners are never touched).
+RenderOrSuggest (Join-Path $cc 'memory-gate.yml.tmpl') (Join-Path $Target '.github\workflows\memory-gate.yml')
+$coPy = $null
+foreach ($c in 'py', 'python', 'python3') { if (Get-Command $c -ErrorAction SilentlyContinue) { $coPy = $c; break } }
+$coBlock = $null
+if ($coPy) {
+  $coBlock = (& $coPy (Join-Path $Target 'memory\scripts\memory_guard.py') --notes-root (Join-Path $Target 'memory') codeowners --print 2>$null) -join "`n"
+  if ($LASTEXITCODE -ne 0) { $coBlock = $null }
+}
+$coFile = Join-Path $Target '.github\CODEOWNERS'
+if ($coBlock) {
+  $utf8 = New-Object System.Text.UTF8Encoding($false)
+  $haveBlock = $false
+  if (Test-Path $coFile) {
+    $cur = [System.IO.File]::ReadAllText($coFile)
+    $i = $cur.IndexOf('# >>> cairn memory'); $j = $cur.IndexOf('# <<< cairn memory <<<')
+    if ($i -ge 0 -and $j -gt $i) { $haveBlock = ($cur.Substring($i, $j - $i + '# <<< cairn memory <<<'.Length).TrimEnd() -ceq $coBlock.TrimEnd()) }
+  }
+  if ($haveBlock) {
+    $skipped.Add('.github/CODEOWNERS (memory block already current)')
+  } elseif (Test-Path $coFile) {
+    [System.IO.File]::WriteAllText("$coFile.team-memory.suggested", $coBlock + "`n", $utf8)
+    $suggested.Add('.github/CODEOWNERS (append the memory block, or run memory/scripts/memory_guard.py --notes-root memory codeowners --write)')
+  } else {
+    New-Item -ItemType Directory -Force -Path (Join-Path $Target '.github') | Out-Null
+    [System.IO.File]::WriteAllText($coFile, $coBlock + "`n", $utf8)
+    $created.Add('.github/CODEOWNERS (memory block)')
+  }
+} else {
+  $skipped.Add('.github/CODEOWNERS: fill the owner GitHub login in memory/governance/roles.json, then run memory/scripts/memory_guard.py --notes-root memory codeowners --write')
+}
+
 # 4. CLAUDE.md
 $claude = Join-Path $Target 'CLAUDE.md'
 $snippet = [System.IO.File]::ReadAllText((Join-Path $cc 'CLAUDE-snippet.md.tmpl')).Replace('__PROJECT_NAME__', $Name).Replace('__PROJECT_TITLE__', $Title)

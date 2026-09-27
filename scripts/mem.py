@@ -676,7 +676,9 @@ class Mem:
 SYMPTOM_RX = (r"\bkeeps? \w+ing\b|\bhas no\b|\bhave no\b|\bno (?:output|data|results?|rows?|response)\b|"
               r"\bmissing\b|\bwrong\b|\bstopped\b|\bstuck\b|\bhangs?\b|\bfreez\w*|\bblank\b|"
               r"\bdoesn'?t\b|\bdoes not\b|\bwon'?t\b|\bcan'?t\b|\bnot (?:showing|loading|saving|updating|sending)\b|"
-              r"\bduplicat\w*|\breturns? (?:an? )?(?:error|5\d\d)\b|\btim(?:es|ed|ing) out\b|\btoo slow\b")
+              r"\bduplicat\w*|\breturns? (?:an? )?(?:error|5\d\d)\b|\btim(?:es|ed|ing) out\b|\btoo slow\b|"
+              r"\b(?:is|are|goes|went|turned|turns) red\b|\breturns? (?:nothing|null|none|empty)\b|\bis empty\b|"
+              r"\binvent(?:s|ed|ing)?\b|\bhallucinat\w*|\bmade[- ]up\b|\bfabricat\w*")
 
 
 def detect_mode(ask, function=None, extra_symptoms=()):
@@ -723,7 +725,9 @@ def detect_mode(ask, function=None, extra_symptoms=()):
         return "debug", "no intent word; %r reads like a symptom" % m.group(0).strip()
     if function == "pm":
         return "plan", "no intent word; you are a PM"
-    return "build", "no intent word; defaulting to build"
+    # A guess, and the receipt says so: the held-out review found asks with no intent word silently
+    # read as build, which loads the wrong neighbourhood for a bug report.
+    return "build", "A GUESS: no intent word or symptom; if this is a bug, rerun with --mode debug"
 
 
 def path_tokens(ask):
@@ -1136,7 +1140,7 @@ def cmd_resolve(mem, a):
     ranked, confident = resolve(mem, corpus, a.ask, a.touching or [])
     mode, why = detect_mode(a.ask, mem.acting()["function"], mem.proto.get("extra_symptoms") or ())
     if a.json:
-        print(json.dumps({"mode": mode, "confident": confident,
+        print(json.dumps({"mode": mode, "why": why, "confident": confident,
                           "features": [{"title": n["title"], "score": s, "reasons": r} for s, n, r in ranked[:5]]}, indent=1))
         return EXIT_OK if confident else EXIT_AMBIGUOUS
     print("mode: %s (%s)" % (mode, why))

@@ -10,7 +10,9 @@
   scripts\sync-memory.ps1 status   dirty files, ahead/behind, registration state
 
   Exit codes: 0 ok, 1 error, 2 conflict, 3 secret, 4 access denied, 5 invalid note,
-              6 policy cannot be enforced (guard or Python missing), 75 another sync holds the lock.
+              6 policy cannot be enforced (guard or Python missing), 7 the push was refused because
+              the branch is protected (sync-memory.py then opens a pull request), 75 another sync
+              holds the lock.
 
   THIS FILE MUST STAY PURE ASCII. Windows PowerShell 5.1 reads a BOM-less file as Windows-1252, and
   one em dash broke parsing for everyone on Windows (audit 06-F2). tools/test_sync.py enforces it.
@@ -22,7 +24,9 @@
   pull and push use the configured upstream (06-F9); a busy lock is exit 75 (06-F7).
 
   Env: MEMORY_SYNC_QUIET=1, MEMORY_SYNC_NO_PUSH=1, MEMORY_AGENT=<name>, MEMORY_SYNC_REMOTE (default
-  origin), MEMORY_SYNC_LOCK_HELD=1 (set by sync-memory.py, which holds the lock itself).
+  origin), MEMORY_SYNC_LOCK_HELD=1 (set by sync-memory.py, which holds the lock itself),
+  MEMORY_SYNC_DIRECT_PUSH=0 (commit and rebase, then leave the push to sync-memory.py's
+  pull-request mode).
 #>
 [CmdletBinding()]
 param(
@@ -312,10 +316,16 @@ switch ($Mode) {
         exit 0
       }
       PullRebase
+      if ($env:MEMORY_SYNC_DIRECT_PUSH -eq '0') { Log "$Tag committed locally; sync-memory.py opens the pull request."; exit 0 }
       $slash = $Upstream.IndexOf('/')
       $upRemote = $Upstream.Substring(0, $slash); $upBranch = $Upstream.Substring($slash + 1)
       $out = Invoke-GitNative push --quiet $upRemote "HEAD:$upBranch"
       if ($script:GitExit -ne 0) {
+        if (($out -join "`n") -match '(?i)protected branch|GH006|GH013|repository rule') {
+          $out | ForEach-Object { [Console]::Error.WriteLine($_) }
+          [Console]::Error.WriteLine("$Tag $upBranch is protected: not pushing directly. The commit is kept locally.")
+          exit 7
+        }
         PullRebase
         $out2 = Invoke-GitNative push --quiet $upRemote "HEAD:$upBranch"
         if ($script:GitExit -ne 0) { ($out + $out2) | ForEach-Object { [Console]::Error.WriteLine($_) }; Die 'git push rejected. Not forcing. Fix and run sync post again.' }

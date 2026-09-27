@@ -64,6 +64,8 @@ Then:
    wrong, they will tell you in a word; re-run with `--mode` or `--feature`.
 3. **Exit code 2 means it could not tell which feature this is.** Ask the person *one* question —
    which of the features it listed — then re-run with `--feature "<name>"`. Do not guess.
+4. **A receipt whose mode says `A GUESS`** means the ask named no intent and no symptom. Say so in
+   that same first line and ask whether this is a bug (`--mode debug`) or new work before you start.
 
 While you work:
 

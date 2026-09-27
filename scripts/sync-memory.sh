@@ -10,7 +10,9 @@
 # STOPS (exit 2). It never force-pushes, never auto-resolves, never deletes anything.
 #
 # Exit codes: 0 ok, 1 error, 2 conflict, 3 secret, 4 access denied, 5 invalid note,
-#             6 policy cannot be enforced (guard or Python missing), 75 another sync holds the lock.
+#             6 policy cannot be enforced (guard or Python missing), 7 the push was refused because
+#             the branch is protected (sync-memory.py then opens a pull request), 75 another sync
+#             holds the lock.
 #
 # 2026-09 audit fixes (06-F1..F11): commits are built in a TEMPORARY index holding only this tier,
 # so nothing the user staged elsewhere can ride along; a missing guard or interpreter blocks the
@@ -23,6 +25,8 @@
 #   <notes_root>/.agents/skills/team-memory/SKILL.md  <- canonical skill; copies go to <repo>/.claude and <repo>/.kiro
 #
 # Env: MEMORY_SYNC_QUIET=1 (less output), MEMORY_SYNC_NO_PUSH=1 (commit but don't push),
+#      MEMORY_SYNC_DIRECT_PUSH=0 (commit and rebase, then leave the push to sync-memory.py's
+#      pull-request mode),
 #      MEMORY_AGENT=<name> (recorded in the commit trailer), MEMORY_SYNC_REMOTE (default: origin)
 
 set -u
@@ -274,9 +278,18 @@ case "$MODE" in
       fi
       rm -f "$list"
       pull_rebase
+      if [ "${MEMORY_SYNC_DIRECT_PUSH:-1}" = "0" ]; then
+        log "$TAG committed locally; sync-memory.py opens the pull request."
+        exit 0
+      fi
       UP_REMOTE="${UPSTREAM%%/*}"; UP_BRANCH="${UPSTREAM#*/}"
       err="$(mktemp)"
       git push --quiet "$UP_REMOTE" "HEAD:$UP_BRANCH" 2>"$err" || {
+        if grep -Eqi 'protected branch|GH006|GH013|repository rule' "$err"; then
+          cat "$err" >&2; rm -f "$err"
+          printf '%s %s is protected: not pushing directly. The commit is kept locally.\n' "$TAG" "$UP_BRANCH" >&2
+          exit 7
+        fi
         # someone pushed between our pull and push: one retry, still no force
         pull_rebase
         git push --quiet "$UP_REMOTE" "HEAD:$UP_BRANCH" 2>>"$err" || { cat "$err" >&2; rm -f "$err"; die "git push rejected. Not forcing. Fix and run: $0 post"; }

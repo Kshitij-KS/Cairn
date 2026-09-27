@@ -202,11 +202,29 @@ git commit -m "cairn: set up the team" && git push -u origin main
 
 ### 5. Turn on the enforcement that actually holds
 
-Until this step every rule runs on each laptop. After it, GitHub enforces them. In **Settings ->
-Rules -> Rulesets**, add a ruleset for `main` that requires a pull request, Code Owner review,
-dismissal of stale approvals, and the status checks **`gate`**, **`route`**, **`test`** and
-**`windows-sync`**, and blocks force pushes and deletion. [`RUNBOOK.md`](../RUNBOOK.md) lists
-three throwaway pull requests that prove the gate is doing its job.
+Until this step every rule runs on each laptop. After it, GitHub enforces them.
+
+1. Set `"enforcement": {"mode": "pr"}` in `governance/roles.json`. Each person's end-of-turn sync
+   then pushes their notes to their own branch, `memory/<you>`, and keeps one pull request open for
+   it, using the GitHub CLI if it is installed (otherwise it prints the link). Nobody pushes to `main`.
+2. In **Settings -> Rules -> Rulesets**, add a ruleset for `main`: require a pull request and Code
+   Owner review, **0 required approvals**, dismiss stale approvals, require the checks **`gate`**,
+   **`route`**, **`test`** and **`windows-sync`**, and block force pushes and deletion.
+3. Prove the gate with the three throwaway pull requests in [`RUNBOOK.md`](../RUNBOOK.md).
+4. Let observations merge on their own: turn on **Allow auto-merge**, set
+   `"auto_merge_levels": ["L0"]`, and regenerate CODEOWNERS. Journal notes then land once the checks
+   pass; anything above L0 waits for the person with that role.
+
+```mermaid
+flowchart LR
+    A["agent's turn ends"] --> S["sync: stamp, check, commit locally"]
+    S --> B["push to memory/&lt;you&gt;<br/>(never to main)"]
+    B --> P["one open pull request per person"]
+    P --> G["memory-gate: base revision judges it"]
+    G -->|L0 and auto-merge on| M["merged"]
+    G -->|L1 to L3| R["waits for the role's reviewer"] --> M
+    M --> N["next session start: pull; local copies drop out"]
+```
 
 ### 6. Teammates
 
@@ -344,6 +362,11 @@ flowchart TB
 A pull request that weakens the guard turns its own check red, because the base revision's tests
 are run against it. `tools/test_gate.py` runs exactly these steps locally against such an attack.
 
+For a project tier (`memory/` inside a code repository) the scaffold installs its own
+`memory-gate` workflow scoped to `memory/**` and a marked block of `/memory/...` lines in the
+repository's CODEOWNERS, so a code pull request cannot quietly rewrite the project's features or
+its policy.
+
 The gates that need people (`memory-gate`, `cascade`, `changelog`, `atlas`) stay idle in the
 unconfigured template and start the moment `init.py` marks the repository as an instance. `tests`
 always runs.
@@ -437,8 +460,9 @@ cd web/test && npm ci && npm test         # the Atlas page, and a negative test 
 | `test_mem.py` | the entry protocol, recall, concurrency and damage to local state, experiments |
 | `test_atlas.py` | redaction, closed schema, restricted traces, 25 tampering cases |
 | `test_gate.py` | the pull-request gate, run the way CI runs it, against an attack PR |
-| `test_sync.py` | sync against local remotes (`--impl bash`, `powershell` or `all`) |
+| `test_sync.py` | sync against local remotes (`--impl bash`, `powershell` or `all`), including a protected `main` and the pull-request mode |
 | `test_init.py` | `init.py` produces a guard-clean instance and refuses bad input and a second run |
+| `test_scaffold.py` | a project tier gets its gate workflow and CODEOWNERS block, never overwrites the product's files, and a second run changes nothing |
 | `test_parsers.py` | shared frontmatter and claim parsers |
 
 CI runs all of it on every pull request, plus the sync scenarios on a Windows runner.
@@ -450,7 +474,10 @@ CI runs all of it on every pull request, plus the sync scenarios on a Windows ru
 - **Nothing is a security boundary until `main` is protected.** Before that, the guard on each
   laptop is a guard-rail that an agent following its instructions respects and a hostile process
   can skip. After it, a change reaches `main` only through a pull request the base revision has
-  judged and a Code Owner has approved.
+  judged and, above the auto-merge levels, a Code Owner has approved.
+- On a laptop, an agent cannot promote itself with `MEMORY_ACTOR_KIND=human`: inside an agent
+  runtime with no terminal the claim is ignored. A process can still drop the runtime's markers,
+  which is why review, not the laptop, is the boundary.
 - Secret detection is pattern-based; novel formats pass. Name where a secret lives, never paste it.
 - Notes are data, not instructions. The guard refuses common injection phrasing, but the main
   control is that agents are told, and hooks enforce, that notes never override their rules.
@@ -458,7 +485,9 @@ CI runs all of it on every pull request, plus the sync scenarios on a Windows ru
   not a convention. The Atlas omits every trace of it.
 - Publishing the Atlas is manual (Actions -> atlas); the workflow runs the redaction tests first.
 - Choosing which feature a task is about relies on files and words; it works best when feature
-  notes list the code they cover, and asks when unsure.
+  notes list the code they cover. It asks when unsure which feature, and the receipt says
+  `A GUESS` when it had to guess the kind of task. On asks it was not tuned on it chose the right
+  feature 8 of 8 times and the right mode 7 of 8.
 
 The full threat model, invariants and known limitations are in
 [`ARCHITECTURE.md`](../ARCHITECTURE.md) sections 7, 9 and 10. To report a vulnerability, see

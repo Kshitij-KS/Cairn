@@ -156,19 +156,31 @@ If you push with a different GitHub account than the one this machine normally u
 
 ### 2.5 Turn on the enforcement that actually holds (GitHub web)
 
-Until this step, every rule is only checked on each laptop. After it, GitHub enforces them.
+Until this step, every rule is only checked on each laptop. After it, GitHub enforces them, and
+agents' notes reach `main` through pull requests the sync opens for them.
 
-- **Settings -> Branches -> Add ruleset for `main`**: require a pull request; require review from
-  Code Owners; dismiss stale approvals; require the status checks **`gate`**, **`route`**, **`test`**
-  and **`windows-sync`** (they appear after the first pull request runs); block force pushes and
-  deletion.
-- Leave auto-merge **off** for now.
+1. **Switch the sync to pull requests.** In `governance/roles.json` set `"enforcement": {"mode": "pr"}`
+   and commit it. From then on each person's end-of-turn sync pushes their notes to their own
+   branch, `memory/<you>`, and keeps **one** pull request open for it (with the GitHub CLI `gh`
+   installed and signed in; otherwise it prints the link to open it). Nobody pushes to `main`.
+2. **Settings -> Branches -> Add ruleset for `main`**: require a pull request; require review from
+   Code Owners; **required approvals: 0** (Code Owner review is what decides who must approve);
+   dismiss stale approvals; require the status checks **`gate`**, **`route`**, **`test`** and
+   **`windows-sync`** (they appear after the first pull request runs); block force pushes and
+   deletion.
+3. Prove the gate with the three throwaway pull requests below before trusting anything to it.
+4. **Then let observations merge on their own**: Settings -> General -> **Allow auto-merge**; set
+   `"auto_merge_levels": ["L0"]` in `roles.json`; run
+   `uv run -q --script scripts/memory_guard.py codeowners --write` and commit both. CODEOWNERS then
+   names reviewers only for levels above L0, and the gate enables auto-merge on pull requests it
+   classifies L0: an agent's journal note lands once the checks pass, while a change to features,
+   context, decisions or the rules still waits for the person with that role.
 - Publishing the map (Actions -> atlas) commits `web/data/graph.json` straight to `main` as
   `github-actions[bot]`. With the ruleset above that push is refused unless you add
   **GitHub Actions** to the ruleset's bypass list. Only do that if you publish the map; the
   workflow only runs code that is already on `main`.
 
-Then prove it with three throwaway pull requests (close each after checking):
+The three throwaway pull requests (close each after checking):
 
 1. edit `context/company.md`: labelled `memory:L2`, waits for your review;
 2. make `scripts/memory_guard.py` return 0 at the start of `main()`: the `gate` check is **red**;
@@ -223,12 +235,12 @@ uv run -q --script scripts/sync-memory.py pre           # pull, register with Ba
 uv run -q --script scripts/memory_guard.py explain      # shows what you may change
 ```
 
-**Windows:** agents' automatic end-of-turn commits stay off until the sync tests have passed once on
-your machine:
+**Windows:** the sync runs through Windows PowerShell, which CI tests on every change. To check your
+own machine, or to pause agents' automatic commits there:
 
 ```powershell
 py tools\test_sync.py                                   # must end "0 failed"
-setx MEMORY_SYNC_WINDOWS_POST 1                         # then open a new terminal
+setx MEMORY_SYNC_WINDOWS_POST 0                         # pause auto-commit on this machine (1 or unset: on)
 ```
 
 ---
@@ -381,9 +393,11 @@ scripts\new-project-memory.ps1 C:\path\to\your-repo       # Windows
 ```
 
 This creates `your-repo/memory/` with its own notes, guard, policy and sync scripts, and the agent
-configuration for Claude Code, Kiro and Cursor. It never overwrites a file; where a config already
-exists it writes a `.team-memory.suggested` file for you to merge. Agents then search both tiers,
-project first.
+configuration for Claude Code, Kiro and Cursor. On GitHub it adds a `memory-gate` workflow that
+judges any pull request touching `memory/` with the base revision's guard, and a marked block of
+`/memory/...` lines in `.github/CODEOWNERS` (the product's own code owners are never touched). It
+never overwrites a file; where one already exists it writes a `.team-memory.suggested` file for you
+to merge, and running it again changes nothing. Agents then search both tiers, project first.
 
 ---
 
@@ -426,14 +440,20 @@ cd web/test && npm ci && npm test  # the map's page, including a privacy check o
 
 - **Nothing is a security boundary until step 2.5 is done.** Before branch protection, every rule
   runs on each laptop, where a determined process can skip it. After it, a change reaches `main`
-  only through a pull request that the base revision's code has judged and an owner has approved.
+  only through a pull request that the base revision's code has judged and, above the auto-merge
+  levels, the person with the role has approved. On a laptop the guard ignores an agent's claim to
+  be a person (`MEMORY_ACTOR_KIND=human` with an agent runtime and no terminal), but a process can
+  still drop the markers: review is the boundary.
 - **Automatic publishing of the map is off.** Publish by hand: Actions -> atlas -> Run workflow.
   The workflow runs the redaction tests first.
 - Choosing which feature a task is about relies on files and words; it works best when feature
-  notes list the code they cover. When unsure, it asks.
+  notes list the code they cover. When unsure which feature, it asks; when it has to guess the mode,
+  the receipt says `A GUESS`. Measured on asks it was not tuned on: the feature right 8 of 8, the
+  mode right 7 of 8 (one guessed build for a bug report, flagged as a guess).
 - Known open items: heavy edits can move a fact's id to an unrelated fact; an experiment comparison
-  can report success when the experiment changes the tests themselves; a new project memory starts
-  with notes the guard flags until the first `stamp`. See ARCHITECTURE.md section 10.
+  can report success when the experiment changes the tests themselves; a scaffolded project tier gets
+  a `memory-gate` workflow and the memory block of CODEOWNERS, but its notes ride the code
+  branch, so the code pull request's review is what approves them. See ARCHITECTURE.md section 10.
 
 ## Relations
 - relates_to [[Core]]

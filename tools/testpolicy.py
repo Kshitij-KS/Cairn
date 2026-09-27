@@ -43,7 +43,8 @@ def policy():
 
 def install(governance_dir):
     """Write the test policy as <governance_dir>/roles.json."""
+    d = policy()   # read before opening for write: installing into this repo's own governance/ must not empty it
     os.makedirs(governance_dir, exist_ok=True)
     with open(os.path.join(governance_dir, "roles.json"), "w", encoding="utf-8", newline="\n") as fh:
-        json.dump(policy(), fh, indent=2, ensure_ascii=False)
+        json.dump(d, fh, indent=2, ensure_ascii=False)
         fh.write("\n")

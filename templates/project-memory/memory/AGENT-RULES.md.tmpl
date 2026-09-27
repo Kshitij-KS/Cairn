@@ -14,7 +14,8 @@ Two memory tiers are served by the Basic Memory MCP server: project **`__PROJECT
    `uv run -q --script memory/scripts/mem.py load "<the ask>" --touching <file>...` from the repo
    root. It loads this project's `CORE.md` and feature map, resolves the feature, picks a mode and
    loads the neighbourhood by direction. Read the bundle file it names; post the receipt's first
-   line; exit 2 = ask the person which feature, re-run with `--feature`. Company-wide canon is in
+   line; exit 2 = ask the person which feature, re-run with `--feature`; a mode marked `A GUESS` =
+   ask whether it is a bug (`--mode debug`) before starting. Company-wide canon is in
    `cairn` (run the same command there, or `search_notes` with `search_all_projects: true`).
    If `mem.py` cannot run: `search_notes` + `read_note` on `CORE.md`, `features/`, `context/`,
    accepted ADRs, and post `Memory: read <n> notes — <fact>; <fact>; <ADR or "no ADR">.`

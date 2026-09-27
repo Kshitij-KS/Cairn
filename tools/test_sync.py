@@ -8,9 +8,9 @@ Every scenario is one of the audit's area-06 reproductions, run against local ba
   powershell  sync-memory.ps1 - the default on Windows (what the dispatcher runs there)
   --impl all  both; a requested implementation that is missing is a failure, not a skip
 
-On Windows this is THE check that lifts the containment on agent auto-commit: when it passes with
-`powershell` (5.1), set MEMORY_SYNC_WINDOWS_POST=1. The builder's sandbox had no PowerShell, so the
-PowerShell column has never been run there - see REMEDIATION.md.
+On Windows it runs with `powershell` (5.1), the implementation the dispatcher uses there; CI runs
+that column on every change (tests.yml, windows-sync). It also covers a protected default branch
+and the pull-request mode of sync-memory.py.
 
     py tools/test_sync.py            # Windows
     python3 tools/test_sync.py       # macOS / Linux
@@ -132,6 +132,35 @@ def clone(tmp, bare, name, prefix=""):
     return d, (os.path.join(d, prefix) if prefix else d)
 
 
+PROTECT_HOOK = """#!/bin/sh
+# emulates GitHub branch protection: refuse direct updates to main unless ALLOW_MAIN is set
+while read old new ref; do
+  if [ "$ref" = "refs/heads/main" ] && [ -z "$ALLOW_MAIN" ]; then
+    echo "error: GH006: Protected branch update failed for refs/heads/main." >&2; exit 1
+  fi
+done
+exit 0
+"""
+
+
+def protect(bare):
+    hook = os.path.join(bare, "hooks", "pre-receive")
+    with open(hook, "w", newline="\n") as fh:
+        fh.write(PROTECT_HOOK)
+    os.chmod(hook, 0o755)
+
+
+def remote_count(bare, rng):
+    out = subprocess.run(["git", "--git-dir", bare, "rev-list", "--count", rng], stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, text=True).stdout.strip()
+    return int(out) if out.isdigit() else -1
+
+
+def new_note(nr, name):
+    with open(os.path.join(nr, "log", "journal", name + ".md"), "w", newline="\n") as fh:
+        fh.write(NOTE.format(t=name.replace("-", " ").title()))
+
+
 def append(path, text):
     with open(path, "a", newline="\n") as fh:
         fh.write(text)
@@ -140,7 +169,7 @@ def append(path, text):
 def scenarios(impl, tmp):
     print("\n=== %s ===" % impl)
     T = lambda n: os.path.join(tmp, impl + "-" + n)
-    for n in ("happy", "scope", "fail", "conflict", "autostash", "ahead", "detached", "upstream", "staging", "secret"):
+    for n in ("happy", "scope", "fail", "conflict", "autostash", "ahead", "detached", "upstream", "staging", "secret", "protected"):
         os.makedirs(T(n))
 
     # happy path
@@ -238,6 +267,18 @@ def scenarios(impl, tmp):
     rc, out = run_native(impl, nr, "post")
     ok("an in-tier .env is exit 3 and nothing is committed", rc == 3 and git(a, "rev-parse", "HEAD") == before, (rc, out[-160:]))
 
+    # protected default branch: the native script refuses to retry and says so with exit 7
+    bare, a, nr = make_remote(T("protected"), "r")
+    protect(bare)
+    new_note(nr, "2026-10-06-protected")
+    rc, out = run_native(impl, nr, "post")
+    ok("a push refused by a protected branch is exit 7, the commit kept locally, main untouched",
+       rc == 7 and git(a, "rev-list", "--count", "@{u}..HEAD") == "1" and remote_count(bare, "main") == 1, (rc, out[-200:]))
+    new_note(nr, "2026-10-07-commit-only")
+    rc, out = run_native(impl, nr, "post", env={"MEMORY_SYNC_DIRECT_PUSH": "0"})
+    ok("MEMORY_SYNC_DIRECT_PUSH=0 commits and rebases but attempts no push",
+       rc == 0 and git(a, "rev-list", "--count", "@{u}..HEAD") == "2" and "GH006" not in out, (rc, out[-200:]))
+
 
 def dispatcher_tests(tmp):
     print("\n=== dispatcher (sync-memory.py) ===")
@@ -262,6 +303,93 @@ def dispatcher_tests(tmp):
     p = subprocess.run([sys.executable, disp, "bogus"], cwd=nr, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                        text=True, env=clean_env())
     ok("an unknown mode is a usage error (64)", p.returncode == 64, p.returncode)
+    pr_mode_tests(tmp)
+
+
+FAKE_GH = """import os, sys
+log = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gh.log")
+open(log, "a").write(" ".join(sys.argv[1:3]) + "\\n")
+flag = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pr.open")
+if sys.argv[1:3] == ["pr", "list"]:
+    if os.path.exists(flag):
+        print("https://github.com/example/repo/pull/7")
+elif sys.argv[1:3] == ["pr", "create"]:
+    open(flag, "w").close()
+    print("https://github.com/example/repo/pull/7")
+"""
+
+
+def pr_mode_tests(tmp):
+    """The protected-branch path end to end, through the dispatcher (the platform's native script)."""
+    print("\n=== pull-request mode (sync-memory.py) ===")
+    d = os.path.join(tmp, "prmode")
+    os.makedirs(d)
+    bare, a, nr = make_remote(d, "r")
+    protect(bare)
+    disp = os.path.join(nr, "scripts", "sync-memory.py")
+
+    def post(extra=None):
+        p = subprocess.run([sys.executable, disp, "post", "--agent"], cwd=nr, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, text=True, env=clean_env(dict({"MEMORY_SYNC_NO_GH": "1"}, **(extra or {}))))
+        return p.returncode, p.stdout + p.stderr
+
+    new_note(nr, "2026-10-06-one")
+    rc, out = post()
+    ok("direct mode on a protected main falls back to memory/<who>: exit 0, one commit on the branch",
+       rc == 0 and remote_count(bare, "main..memory/alex") == 1 and remote_count(bare, "main") == 1, (rc, out[-240:]))
+    new_note(nr, "2026-10-07-two")
+    rc, out = post()
+    ok("the next turn adds to the same branch (one pull request per person)",
+       rc == 0 and remote_count(bare, "main..memory/alex") == 2, (rc, out[-200:]))
+    m = os.path.join(d, "merger")
+    git(d, "clone", "-q", bare, m)
+    git(m, "merge", "-q", "--squash", "origin/memory/alex")
+    git(m, "commit", "-qm", "memory: notes from alex (#1)")
+    git(m, "push", "-q", "origin", "main", env=clean_env({"ALLOW_MAIN": "1"}))
+    p = subprocess.run([sys.executable, disp, "pre"], cwd=nr, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                       text=True, env=clean_env())
+    ok("after the pull request is squash-merged, pre leaves nothing unpushed",
+       p.returncode == 0 and git(a, "rev-list", "--count", "@{u}..HEAD") == "0", (p.returncode, (p.stdout + p.stderr)[-200:]))
+    git(m, "fetch", "-q")
+    git(m, "switch", "-q", "-c", "foreign", "origin/memory/alex")
+    new_note(os.path.join(m, os.path.relpath(nr, a)) if nr != a else m, "2026-10-08-foreign")
+    git(m, "add", "-A")
+    git(m, "commit", "-qm", "foreign")
+    git(m, "push", "-q", "origin", "HEAD:memory/alex")
+    before = subprocess.run(["git", "--git-dir", bare, "rev-parse", "memory/alex"], stdout=subprocess.PIPE, text=True).stdout.strip()
+    new_note(nr, "2026-10-09-three")
+    rc, out = post()
+    after = subprocess.run(["git", "--git-dir", bare, "rev-parse", "memory/alex"], stdout=subprocess.PIPE, text=True).stdout.strip()
+    ok("negative: a change on memory/<who> this machine lacks is never overwritten (exit 1)",
+       rc == 1 and before == after and "not overwriting" in out, (rc, out[-200:]))
+    # a clean second person, mode pr, with a fake GitHub CLI: one pull request created, then reused
+    bin_dir = os.path.join(d, "bin")
+    os.makedirs(bin_dir)
+    with open(os.path.join(bin_dir, "gh.py"), "w") as fh:
+        fh.write(FAKE_GH)
+    if os.name == "nt":
+        with open(os.path.join(bin_dir, "gh.cmd"), "w") as fh:
+            fh.write('@"%s" "%%~dp0gh.py" %%*\n' % sys.executable)
+    else:
+        with open(os.path.join(bin_dir, "gh"), "w") as fh:
+            fh.write('#!/bin/sh\nexec "%s" "$(dirname "$0")/gh.py" "$@"\n' % sys.executable)
+        os.chmod(os.path.join(bin_dir, "gh"), 0o755)
+    d2 = os.path.join(d, "second")
+    os.makedirs(d2)
+    bare2, _a2, nr2 = make_remote(d2, "r")
+    protect(bare2)
+    env2 = {"MEMORY_SYNC_MODE": "pr", "PATH": bin_dir + os.pathsep + os.environ.get("PATH", "")}
+    disp2 = os.path.join(nr2, "scripts", "sync-memory.py")
+    outs = []
+    for name in ("2026-10-10-pr-one", "2026-10-11-pr-two"):
+        new_note(nr2, name)
+        p = subprocess.run([sys.executable, disp2, "post", "--agent"], cwd=nr2, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, text=True, env=clean_env(env2))
+        outs.append((p.returncode, p.stdout + p.stderr))
+    calls = open(os.path.join(bin_dir, "gh.log")).read().split("\n") if os.path.exists(os.path.join(bin_dir, "gh.log")) else []
+    ok("mode pr: no direct push is attempted, one pull request is created and then reused",
+       all(rc == 0 for rc, _ in outs) and calls.count("pr create") == 1 and all("GH006" not in o for _, o in outs)
+       and "pull/7" in outs[-1][1] and remote_count(bare2, "main..memory/alex") == 2, (outs, calls))
 
 
 def static_tests():
@@ -306,7 +434,7 @@ def main(argv):
         shutil.rmtree(tmp, ignore_errors=True)
     passed = sum(RESULTS)
     print("\n%d passed, %d failed (implementations: %s)" % (passed, len(RESULTS) - passed, ", ".join(cols)))
-    expected = 2 + 11 * len(cols) + 5
+    expected = 2 + 13 * len(cols) + 10
     return 0 if passed == len(RESULTS) == expected else 1  # a run that stops early is red
 
 

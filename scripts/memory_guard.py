@@ -191,6 +191,14 @@ AGENT_MARKERS = ("CLAUDE_CODE_SESSION_ID", "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT
                  "CURSOR_AGENT", "MEMORY_AGENT")
 
 
+def _interactive():
+    """A person at a terminal: both stdin and stderr are TTYs. Hooks and agent shell tools have neither."""
+    try:
+        return sys.stdin.isatty() and sys.stderr.isatty()
+    except (AttributeError, ValueError, OSError):
+        return False
+
+
 class Ctx:
     """Everything the checks need: where we are, who we are, and what the policy says."""
 
@@ -223,10 +231,20 @@ class Ctx:
         # the others are best-effort and UNVERIFIED. This is a guard-rail for honest agents, not a
         # security boundary: a process can always set MEMORY_ACTOR_KIND=human. The boundary is review
         # plus branch protection on the remote (ARCHITECTURE.md, threat model).
-        default_kind = "agent" if any(os.environ.get(k) for k in AGENT_MARKERS) else "human"
+        markers = [k for k in AGENT_MARKERS if os.environ.get(k)]
+        default_kind = "agent" if markers else "human"
         self.actor_kind = (os.environ.get("MEMORY_ACTOR_KIND") or default_kind).strip().lower()
         if self.actor_kind not in ("human", "agent", "bot"):
             self.actor_kind = "human"
+        # An agent claiming to be a person (or the CI bot) with one environment variable was the
+        # cheapest escalation there was. Inside an agent runtime, with no terminal attached, the
+        # claim is ignored: a person typing at a terminal still commits as themselves. Raises the
+        # bar only - a process can also drop the markers - so review stays the boundary.
+        if self.actor_kind in ("human", "bot") and markers and not _interactive():
+            sys.stderr.write("memory-guard: MEMORY_ACTOR_KIND=%s ignored: an AI agent runtime is present (%s) and no "
+                             "terminal is attached, so this runs as agent. Commit from your own terminal to act "
+                             "as yourself.\n" % (self.actor_kind, ", ".join(markers)))
+            self.actor_kind = "agent"
         self.agent_name = (
             os.environ.get("MEMORY_AGENT")
             or ("claude-code" if os.environ.get("CLAUDE_CODE_ENTRYPOINT") else "")
@@ -625,6 +643,15 @@ INJECTION_PATTERNS = [
     (r"(?i)\bgit\s+push\s+(--force|-f)\b", "force-push instruction"),
     (r"(?i)without (asking|confirming|telling) (the )?(user|human)", "instruction to bypass the human"),
     (r"(?i)\bdo not (tell|inform|mention to) the (user|human)", "instruction to conceal"),
+    # 2026-09 review: the two phrasings that passed were a note telling agents to claim to be a
+    # person, and one telling them to keep guard warnings from the user. Measured: 0 false
+    # positives over the template's and a real instance's 97 notes.
+    ('(?i)\\b(set|export|use|pass|add)\\b[^.\\n]{0,40}\\bMEMORY_(ACTOR_KIND|ACTOR_EMAIL|POLICY_REF|SYNC_MODE)\\b', "instruction to change the guard's view of who is acting"),
+    ('(?i)--no-verify\\b', 'instruction to skip the commit gate'),
+    ('(?i)\\b(skip|bypass|disable|turn off|get around|work around)\\b[^.\\n]{0,25}\\b(the )?(memory )?(guard|gate|hooks?|pre-commit|branch protection|code ?owners)\\b', 'instruction to bypass a control'),
+    ('(?i)\\b(note|message|reminder|instructions?) (to|for) (all |any |the |future |other )*(ai |coding )?(agents?|assistants?|models?|llms?|claude|copilots?)\\b', 'text addressed to future agents'),
+    ("(?i)\\b(do not|don't|never|avoid)\\b[^.\\n]{0,15}\\b(mention|report|show|surface|tell|reveal|flag|raise)\\b[^.\\n]{0,40}\\b(to )?(the )?(user|human|person|owner|reviewer)s?\\b", 'instruction to conceal'),
+    ('(?i)\\b(hide|conceal|suppress|silence)\\b[^.\\n]{0,30}\\b(warnings?|errors?|findings?|guard|blocks?)\\b[^.\\n]{0,20}\\b(from )?(the )?(user|human|reviewer)', 'instruction to conceal'),
 ]
 # Paths that legitimately contain instructions to agents.
 # ARCHITECTURE.md documents the deny-list and the threat model, so it quotes the very commands the
@@ -1325,32 +1352,112 @@ def cmd_classify(ctx, args):
     return EXIT_OK
 
 
-def cmd_codeowners(ctx, args):
-    """Generate .github/CODEOWNERS from roles.json: every path needs an OWNER's review while the
-    team is small (audit containment). Refuses to write placeholders (audit 10-F2)."""
-    owners = []
-    for handle, p in ctx.policy.get("people", {}).items():
-        if handle.startswith("$") or not isinstance(p, dict) or p.get("role") != "owner":
-            continue
-        login = (p.get("github") or "").strip().lstrip("@")
-        if not login or "__todo" in login.lower():
-            die("people.%s.github is %r: fill in the GitHub login before CODEOWNERS can name anyone"
-                % (handle, login), EXIT_INVALID)
-        owners.append("@" + login)
+def _codeowners_login(handle, p):
+    login = (p.get("github") or "").strip().lstrip("@")
+    if not login or "__todo" in login.lower():
+        die("people.%s.github is %r: fill in the GitHub login before CODEOWNERS can name anyone"
+            % (handle, login), EXIT_INVALID)
+    return "@" + login
+
+
+def codeowners_body(policy, prefix=""):
+    """CODEOWNERS text for a policy.
+
+    While `enforcement.auto_merge_levels` is empty (the containment default) every path needs an
+    OWNER: one catch-all line. Once levels are allowed to merge on their own (e.g. ["L0"]), a
+    catch-all would still demand a review for them, so instead each rule above those levels, plus
+    the protected floor, names the people whose role reaches that level, and paths at an
+    auto-merge level name nobody. Owners of the floor paths are always owners."""
+    people = [(h, p) for h, p in policy.get("people", {}).items()
+              if not h.startswith("$") and isinstance(p, dict)]
+    owners = sorted(_codeowners_login(h, p) for h, p in people if p.get("role") == "owner")
     if not owners:
         die("no person has role owner", EXIT_INVALID)
-    body = ("# GENERATED by `memory_guard.py codeowners --write` from governance/roles.json. Do not edit.\n"
-            "# Every path needs an owner's review: the containment rule after the 2026-09 audit.\n"
-            "# Only enforced with branch protection on main requiring Code Owner review.\n"
-            "*    %s\n" % " ".join(sorted(owners)))
+    head = "# GENERATED by `memory_guard.py codeowners --write` from governance/roles.json. Do not edit.\n"
+    base = "/" + prefix if prefix else "/"
+    catch_all = (base + "**") if prefix else "*"
+    auto = [l for l in (policy.get("enforcement") or {}).get("auto_merge_levels") or [] if l in LEVEL_ORDER]
+    if not auto:
+        return (head + "# Every path needs an owner's review: the containment rule after the 2026-09 audit.\n"
+                "# Only enforced with branch protection on main requiring Code Owner review.\n"
+                "%s    %s\n" % (catch_all, " ".join(owners)))
+    ceiling = max(LEVEL_ORDER.index(l) for l in auto)
+    roles = policy.get("roles", {})
+
+    def reviewers(level):
+        want = LEVEL_ORDER.index(level)
+        out = set(owners)
+        for h, p in people:
+            ml = (roles.get(p.get("role")) or {}).get("max_level") if isinstance(roles.get(p.get("role")), dict) else None
+            if p.get("role") not in ("agent", "reader", "contributor") and ml in LEVEL_ORDER and LEVEL_ORDER.index(ml) >= want:
+                if (p.get("github") or "").strip():
+                    out.add(_codeowners_login(h, p))
+        return " ".join(sorted(out))
+
+    # roles.json is FIRST match wins; CODEOWNERS is LAST match wins. So the rules are written in
+    # reverse, and a rule at an auto-merge level gets an owner-less line (GitHub's "no owner"),
+    # so a specific L0 folder inside a broader protected glob still merges on its own.
+    lines, seen, unique = [], set(), []
+    for r in (policy.get("paths") or {}).get("rules", []):   # the first rule for a glob is the one that applies
+        glob = (r.get("glob") or "").strip().lstrip("/")
+        if glob and glob not in seen:
+            seen.add(glob)
+            unique.append((glob, r.get("level")))
+    for glob, lvl in reversed(unique):
+        if lvl in ("bot", "derived"):
+            who = " ".join(owners)
+        elif lvl in LEVEL_ORDER and LEVEL_ORDER.index(lvl) > ceiling:
+            who = reviewers(lvl)
+        elif lvl in LEVEL_ORDER:
+            who = ""
+        else:
+            continue
+        lines.append(("%s%s    %s" % (base, glob, who)).rstrip())
+    # the protected floor last, so no policy line can take an owner off it
+    for glob, _lvl in PROTECTED_FLOOR:
+        lines.append("%s%s    %s" % (base, glob, " ".join(owners)))
+    return (head + "# enforcement.auto_merge_levels = %s: paths at those levels name no reviewer, so their pull\n"
+            "# requests merge once memory-gate passes. Every other path names who must review it.\n"
+            "# Written in reverse of roles.json because GitHub applies the LAST matching line; the\n"
+            "# protected floor comes last.\n"
+            % json.dumps(auto) + "\n".join(lines) + "\n")
+
+
+CODEOWNERS_BEGIN = "# >>> cairn memory: generated by memory_guard.py codeowners, do not edit >>>"
+CODEOWNERS_END = "# <<< cairn memory <<<"
+
+
+def cmd_codeowners(ctx, args):
+    """Generate .github/CODEOWNERS from roles.json (see codeowners_body). Refuses to write
+    placeholders (audit 10-F2). The company tier owns the whole file. A project tier (memory/ inside
+    a code repository) owns only a marked block of lines scoped to memory/, so the product's own
+    code owners are never touched."""
+    body = codeowners_body(ctx.policy, ctx.prefix)
+    if ctx.prefix:
+        body = "%s\n%s%s\n" % (CODEOWNERS_BEGIN, body, CODEOWNERS_END)
+    owners = sorted({w for line in body.splitlines() if line and not line.startswith("#") for w in line.split()[1:]})
+    if getattr(args, "print", False):
+        sys.stdout.write(body)
+        return EXIT_OK
     path = os.path.join(ctx.repo_root, ".github", "CODEOWNERS")
     current = read_text(path) if os.path.isfile(path) else ""
+    if ctx.prefix:
+        if CODEOWNERS_BEGIN in current and CODEOWNERS_END in current:
+            i = current.index(CODEOWNERS_BEGIN)
+            j = current.index(CODEOWNERS_END) + len(CODEOWNERS_END)
+            have = current[i:j] + "\n"
+            wanted = current[:i] + body + current[j:].lstrip("\n")
+        else:
+            have = ""
+            wanted = (current.rstrip("\n") + "\n\n" if current.strip() else "") + body
+    else:
+        have, wanted = current, body
     if args.write:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        write_text(path, body)
-        print("memory-guard: wrote .github/CODEOWNERS (%s)" % " ".join(owners))
+        write_text(path, wanted)
+        print("memory-guard: wrote %s.github/CODEOWNERS (%s)" % ("the memory block of " if ctx.prefix else "", " ".join(owners)))
         return EXIT_OK
-    if current != body:
+    if have != body:
         sys.stderr.write("memory-guard: .github/CODEOWNERS does not match roles.json; run codeowners --write\n")
         return EXIT_INVALID
     print("memory-guard: CODEOWNERS matches roles.json")
@@ -1859,6 +1966,7 @@ def main(argv):
 
     p = sub.add_parser("codeowners", help="generate or check .github/CODEOWNERS from roles.json")
     p.add_argument("--write", action="store_true")
+    p.add_argument("--print", action="store_true", help="print what --write would write, change nothing")
 
     p = sub.add_parser("cascade", help="stamp review_needed on notes that depend on a changed plan")
     p.add_argument("--staged", action="store_true")

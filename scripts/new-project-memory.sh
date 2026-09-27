@@ -31,8 +31,11 @@ render() { # render <src> <dest>  — substitute placeholders; never overwrite
   created+=("${dest#"$TARGET"/}")
 }
 render_or_suggest() { # for configs that may already exist (JSON that needs a manual merge)
-  local src="$1" dest="$2"
+  local src="$1" dest="$2" want
   if [ -e "$dest" ]; then
+    # already exactly what we would write (a re-run): nothing to merge
+    want="$(sed -e "s/__PROJECT_NAME__/$NAME/g" -e "s/__PROJECT_TITLE__/$TITLE/g" -e "s/__DATE__/$DATE/g" "$src")"
+    if [ "$want" = "$(cat "$dest")" ]; then skipped+=("${dest#"$TARGET"/}"); return 0; fi
     render "$src" "$dest.team-memory.suggested"; suggested+=("${dest#"$TARGET"/}")
   else render "$src" "$dest"; fi
 }
@@ -60,6 +63,24 @@ render_or_suggest "$TPL/client-config/kiro-mcp.json.tmpl"               "$TARGET
 render_or_suggest "$TPL/client-config/mcp.json.tmpl"                    "$TARGET/.mcp.json"
 render_or_suggest "$TPL/client-config/cursor-mcp.json.tmpl"             "$TARGET/.cursor/mcp.json"
 render_or_suggest "$TPL/client-config/claude-settings.json.tmpl"        "$TARGET/.claude/settings.json"
+
+# 3b. the gate on GitHub: a memory-gate workflow scoped to memory/, and the memory block of
+#     CODEOWNERS (the product's own code owners are never touched). Without these, any code pull
+#     request could rewrite the project's features or its own roles.json unreviewed.
+render_or_suggest "$TPL/client-config/memory-gate.yml.tmpl"             "$TARGET/.github/workflows/memory-gate.yml"
+co_py=""; for c in python3 python py; do command -v "$c" >/dev/null 2>&1 && { co_py="$c"; break; }; done
+if [ -n "$co_py" ] && co_block="$("$co_py" "$TARGET/memory/scripts/memory_guard.py" --notes-root "$TARGET/memory" codeowners --print 2>/dev/null)"; then
+  if [ -e "$TARGET/.github/CODEOWNERS" ] && grep -qF "$co_block" "$TARGET/.github/CODEOWNERS" 2>/dev/null && \
+     [ "$(printf '%s\n' "$co_block")" = "$(sed -n '/^# >>> cairn memory/,/^# <<< cairn memory <<</p' "$TARGET/.github/CODEOWNERS")" ]; then
+    skipped+=(".github/CODEOWNERS (memory block already current)")
+  elif [ -e "$TARGET/.github/CODEOWNERS" ]; then
+    printf '%s\n' "$co_block" > "$TARGET/.github/CODEOWNERS.team-memory.suggested"; suggested+=(".github/CODEOWNERS (append the memory block, or run memory/scripts/memory_guard.py --notes-root memory codeowners --write)")
+  else
+    mkdir -p "$TARGET/.github"; printf '%s\n' "$co_block" > "$TARGET/.github/CODEOWNERS"; created+=(".github/CODEOWNERS (memory block)")
+  fi
+else
+  skipped+=(".github/CODEOWNERS: fill the owner's GitHub login in memory/governance/roles.json, then run memory/scripts/memory_guard.py --notes-root memory codeowners --write")
+fi
 
 # 4. CLAUDE.md — append the import once
 if [ -f "$TARGET/CLAUDE.md" ]; then

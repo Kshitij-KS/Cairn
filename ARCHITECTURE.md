@@ -25,13 +25,19 @@ are NOT done; their open items are listed in section 10.
 
 What is still true regardless: **nothing here is a security boundary until the repository is on
 GitHub with branch protection on `main` requiring Code Owner review and the `memory-gate` check.**
-Everything that runs on a laptop is a guard-rail for honest agents. The workflows have not yet been
-exercised on GitHub from this template. The Windows (PowerShell) sync path was verified on Windows on
-2026-09-25 (11/11 scenarios). Section 11 says how each figure was measured; section 12 lists what was not.
+Everything that runs on a laptop is a guard-rail for honest agents. On GitHub, `tests` (Linux and
+the Windows PowerShell sync) has passed on the template's pushes; `memory-gate` has not yet judged a
+real pull request. Section 11 says how each figure was measured; section 12 lists what was not.
 
-**Containment in force:** L0 auto-merge is off; the public atlas is published by hand only; an
-agent's automatic `post` on Windows commits only where `MEMORY_SYNC_WINDOWS_POST=1` is set (each
-teammate sets it after `tools/test_sync.py` passes on their machine).
+**Containment in force:** nothing auto-merges until an owner adds a level to
+`enforcement.auto_merge_levels`; the public atlas is published by hand only. Agents' automatic
+`post` on Windows is on (it was paused until the PowerShell chain passed on Windows; CI now runs it
+on every change); `MEMORY_SYNC_WINDOWS_POST=0` pauses it on one machine.
+
+**The 2026-09-27 review** found that protecting `main` stopped agents' notes from reaching it (the
+sync pushed only to `main`), that a project tier had no gate on GitHub, that one variable let an
+agent act as a person, and that two injection phrasings passed. All four are fixed below, each with
+a regression test shown to fail without its fix.
 
 Legend: **[verified]** = executed and observed when this was written; **[unverified]** = written from docs or
 reasoning and never executed; **[estimate]** = a number without a precise measurement.
@@ -426,8 +432,23 @@ throttle is per session and advances only after a completed comparison.
 any case), holds **one lock** across native `pre`, `mem compile` and `mem expire` (a busy lock is
 exit 75, never a silent success), sets `MEMORY_ACTOR_KIND=agent` with `--agent`, and runs Windows
 PowerShell 5.1 (`powershell`, falling back to `pwsh`) on Windows, bash elsewhere.
-**Containment:** on Windows, an agent hook's `post` prints a notice and commits nothing until
-`MEMORY_SYNC_WINDOWS_POST=1` is set, which should happen only after `tools/test_sync.py` passes there.
+On Windows an agent hook's `post` commits like everywhere else; `MEMORY_SYNC_WINDOWS_POST=0`
+pauses it on one machine.
+
+**Pull-request mode.** With `enforcement.mode: "pr"` in the policy at HEAD (or
+`MEMORY_SYNC_MODE=pr`), `post` on the default branch commits and rebases locally as usual
+(`MEMORY_SYNC_DIRECT_PUSH=0` tells the native script not to push), then the dispatcher pushes the
+unpushed memory commits to the person's own branch `memory/<who>` (from `user.email`) and keeps one
+pull request open for it with `gh`, or prints the compare link. In direct mode a push the server
+refuses because the branch is protected is exit 7 from the native script, and the dispatcher takes
+the same path. `main` is never force-pushed; `memory/<who>` is rewritten only with
+`--force-with-lease`, and only after checking that every file the remote branch changed is already
+in `HEAD` with the same content (so a squash-merged pull request is fine and a teammate's unique
+commit is refused, exit 1). Once the pull request merges, the next `pre` drops the local copies
+(git rebase skips changes already upstream). On a feature branch nothing changes: a project tier's
+notes ride the code pull request. **[verified: tools/test_sync.py, a protected bare remote, both
+native scripts for exit 7 and commit-only, the dispatcher for fallback, reuse, squash-merge,
+refusal and the gh path with a fake CLI]**
 
 - **pre**: refuses a detached HEAD; `pull --rebase --autostash` against the **configured upstream**;
   any unmerged path afterwards (including a failed autostash re-apply) is exit 2 naming the files;
@@ -440,6 +461,7 @@ PowerShell 5.1 (`powershell`, falling back to `pwsh`) on Windows, bash elsewhere
   if **every** unpushed commit stays inside this tier (a project-tier hook no longer pushes
   application commits). Never force-pushes.
 - Exit codes: 0 ok, 1 error, 2 conflict, 3 secret, 4 denied, 5 invalid, 6 policy unenforceable,
+  7 push refused by a protected branch (native scripts; the dispatcher opens a pull request),
   64 bad usage (dispatcher), 75 busy.
 
 **[verified: bash, 11 scenarios from audit area 06 against local bare remotes, tools/test_sync.py]**
@@ -481,9 +503,15 @@ d3, layout precomputed in Python, no layout in the browser).
 copies `sync-memory.*`, **`memory_guard.py`, `mem.py`** and `governance/roles.json` into
 `memory/`, installs the agent configs (Claude settings and slash commands pointed at
 `memory/scripts/mem.py`, Kiro hooks and steering, Cursor rule, MCP configs) and registers the Basic
-Memory project. It never overwrites; an existing config gets a `.team-memory.suggested` file.
+Memory project. On GitHub it adds `.github/workflows/memory-gate.yml` (scoped to `memory/**`; the
+base revision's `memory/scripts/memory_guard.py` judges the PR with the base policy and labels its
+level) and a marked block of `/memory/...` lines in `.github/CODEOWNERS`, which
+`memory_guard.py --notes-root memory codeowners --write` maintains without touching the product's
+own lines. It never overwrites; an existing file gets a `.team-memory.suggested` twin, and a file
+already holding exactly what it would write is left alone, so a second run changes nothing.
 Before 2026-09-23 the guard was not copied, so project tiers committed with the policy unenforced
-**[fixed; scaffold run end to end in a scratch repo]**.
+**[fixed]**; before 2026-09-27 a project tier had no gate on GitHub at all (08-F2) **[fixed;
+tools/test_scaffold.py]**.
 
 ### 4.7 Agent integration
 
@@ -512,7 +540,7 @@ only fail there; `scripts/init.py` sets the flag. `tests` always runs.
 
 | Workflow | Trigger | Does |
 |---|---|---|
-| `memory-gate.yml` | pull request | checks out the **trusted base revision** and the PR separately; the base's guard judges the PR's data with the base's policy (safety, format, per-commit attribution; `--no-access` because review enforces the level); runs the base's `test_security.py` **against the PR's guard**, so a PR that weakens the guard goes red; checks CODEOWNERS is generated and names real people; `classify` decides the review level. A second job, which runs no PR code, labels the PR and fails if labelling fails. **Nothing auto-merges.** |
+| `memory-gate.yml` | pull request | checks out the **trusted base revision** and the PR separately; the base's guard judges the PR's data with the base's policy (safety, format, per-commit attribution; `--no-access` because review enforces the level); runs the base's `test_security.py` **against the PR's guard**, so a PR that weakens the guard goes red; checks CODEOWNERS is generated and names real people; `classify` decides the review level. A second job, which runs no PR code, labels the PR (fails if labelling fails) and, when the level is in the BASE policy's `enforcement.auto_merge_levels`, enables GitHub auto-merge (squash). Empty by default, so nothing auto-merges until an owner opts in. |
 | `tests.yml` | every PR and push to main | `tools/run_tests.sh` plus the UI suite (`npm ci`) |
 | `atlas.yml` | **manual only** (containment) | redaction tests, page tests, build, `--verify --against-source`, commit as the bot |
 | `cascade.yml` | push to main | stamps `review_needed` on dependents of a landed planning change and opens one issue (moved out of memory-gate, where it could never run: 10-F6) |
@@ -526,9 +554,13 @@ the audit's 10-F1 attack PR and quieter variants **[verified locally; never run 
 
 **What makes any of this binding:** `scripts/init.py` records the owner's GitHub login in `roles.json` and writes
 CODEOWNERS (or run `memory_guard.py codeowners --write` after changing owners), pushes, and protects `main` (require PRs, Code Owner review and
-the `memory-gate` check; dismiss stale approvals). `roles.json` `enforcement.mode` is still `direct`,
-which the sync scripts do not read (11-F6): with direct pushes allowed, agents' commits never meet
-the gate. Branch protection is the switch, not that field.
+the `memory-gate` check; dismiss stale approvals) and sets `enforcement.mode` to `pr`, which the
+sync reads (formerly 11-F6: the field was documented and unread). With `auto_merge_levels`
+non-empty, `codeowners` stops writing the owner catch-all: each path rule above those levels names
+the people whose role reaches it, auto-merge levels name nobody, the protected floor names the
+owners, and the lines are written in reverse because GitHub applies the last matching line while
+roles.json applies the first **[verified: test_security, including a policy that demotes
+`scripts/` still leaving it owned]**.
 
 ---
 
@@ -620,13 +652,14 @@ Each with where it is enforced and the test that shows it failing when broken.
 | Suite | Count | Covers |
 |---|---|---|
 | `tools/test_guard.py` | 22 | claim ids and carry-forward, trailing references, features and write-back, levels for new folders, agent-marker default, project tier from repo root |
-| `tools/test_security.py` | 23 | the audit's access/attribution BLOCKERs as regressions: policy self-demotion, empty policy, the floor, renames, case and Unicode tricks (range mode too), forged and blank authors, derived bytes, public paths, CODEOWNERS, open-under-restricted. Never imports the guard under test (a guard that exits 0 at import once ended a run green) |
+| `tools/test_security.py` | 29 | the audit's access/attribution BLOCKERs as regressions: policy self-demotion, empty policy, the floor, renames, case and Unicode tricks (range mode too), forged and blank authors, derived bytes, public paths, CODEOWNERS (catch-all and level-aware), open-under-restricted; the actor override inside an agent runtime; injection phrasings, with a benign negative. Never imports the guard under test (a guard that exits 0 at import once ended a run green) |
 | `tools/test_gate.py` | 6 | the memory-gate job in its two-checkout shape: the 10-F1 attack PR, a quiet policy demotion, a demoting rename, an honest L0 note |
-| `tools/test_mem.py` | 99 | resolution and modes, directional scope, ledger, cache, privilege, hooks, moved and refs, **area-04 concurrency and damage** (parallel loads, bundle isolation, UTF-8 past refs, cache tamper, session-id collisions and injection, per-session throttle, failed-save retry, corrupt ledgers, purge), write verbs, trials, evals |
+| `tools/test_mem.py` | 102 | resolution and modes (including CI and AI-quality symptoms, the flagged build guess, team `extra_symptoms`), directional scope, ledger, cache, privilege, hooks, moved and refs, **area-04 concurrency and damage** (parallel loads, bundle isolation, UTF-8 past refs, cache tamper, session-id collisions and injection, per-session throttle, failed-save retry, corrupt ledgers, purge), write verbs, trials, evals |
 | `tools/test_parsers.py` | 6 | fenced/inline code ignored by claim and relation parsers |
 | `tools/test_atlas.py` | 47 | content, restricted traces, open-under-restricted, publish_authors, 25 tampering cases, duplicate keys, `--against-source`, bare `--out` |
 | `tools/test_init.py` | 16 | `init.py` on a fresh copy: owner row, instance flag, CODEOWNERS, filled placeholders, stamps, git identity, template-only files removed, a clean guard check and first commit; refuses a second run, a bad email, a bad login, `--yes` without `--github` |
-| `tools/test_sync.py` | 18 per platform (bash on Linux/macOS, PowerShell on Windows); 29 with `--impl all` | 11 area-06 scenarios per implementation against bare remotes, dispatcher mode/lock/usage, ASCII-only PowerShell |
+| `tools/test_sync.py` | 25 per platform (bash on Linux/macOS, PowerShell on Windows); 38 with `--impl all` | 11 area-06 scenarios plus a protected main (exit 7, commit-only) per implementation against bare remotes; dispatcher mode/lock/usage; pull-request mode end to end (fallback, one branch per person, squash-merge then pre, refusal to overwrite, gh with a fake CLI); ASCII-only PowerShell |
+| `tools/test_scaffold.py` | 7 per platform | a project tier gets its guard, policy, `memory-gate` workflow and CODEOWNERS block; an existing CODEOWNERS is untouched (`.suggested`); a second run changes nothing; the new tier passes its guard |
 | `web/test` (`npm test`) | 110 + 9 | UI caps, camera-independent type, **rendered-page privacy oracle** (529 withheld markers on the template corpus), reduced motion, negative tests including a deliberate leak |
 
 Every Python suite checks that the expected number of assertions ran, so a run that stops early is
@@ -651,11 +684,12 @@ guard-rail that an agent following its instructions will respect and a hostile p
 
 | Threat | Control | Holds | Gap |
 |---|---|---|---|
-| An agent rewrites canon | L0 cap; proposals; owner review of every PR | CI + review, once protected | locally, `MEMORY_ACTOR_KIND=human` or skipping the hook still works; only review catches it |
+| An agent rewrites canon | L0 cap; proposals; review of every PR above the auto-merge levels; `MEMORY_ACTOR_KIND=human` ignored inside an agent runtime with no terminal | CI + review, once protected | locally, a process that drops the runtime's markers, or skips the hook, still writes; only review catches it |
 | A PR neutralises the gate (replaces guard, tests, policy) | base-revision checkout judges; base security tests run against the PR's guard; `classify` from the base policy; policy changes are L3 | CI | GitHub behaviour of the two-checkout job never run |
 | A policy change authorises itself | trusted-base policy; both policies must allow; protected floor; catch-all and empty policies refused | local + CI | - |
 | Path tricks (case, Unicode, renames) | normalisation and rename-source classification | local + CI | symlinks on Windows untested (needs Developer Mode) |
-| Note content hijacks an agent | "notes are data" rule; `INJECTION` patterns | commit | patterns are a short list; the instruction is the main control |
+| Note content hijacks an agent | "notes are data" rule; `INJECTION` patterns (overrides, pipe-to-shell, guard variables, `--no-verify`, bypassing a control, text addressed to agents, concealment from the user) | commit | patterns are a list: 0 false positives over 97 real notes, but new phrasings will pass; the instruction is the main control |
+| A code PR rewrites a project tier | the project repo's `memory-gate` (base guard, base policy) and its CODEOWNERS memory block | CI + review, once protected | only if the scaffold's workflow and CODEOWNERS block were committed |
 | Hooks as a remote-code path | hook, script and config roots at L3 under the floor | CI + review | - |
 | Secrets committed | guard `SECRET-*`; sync secret scan on the exact committed tree | local + CI | regex-based; novel formats pass; gitleaks removed from CI |
 | Out-of-tier files ride along a sync | temporary index; tier-only push | local | the Windows CI job has not yet run on GitHub |
@@ -670,8 +704,13 @@ guard-rail that an agent following its instructions will respect and a hostile p
 
 ## 10. Known limitations
 
-- Mode detection is lexical. It misses bug reports that describe neither an intent nor a listed
-  symptom, and a verb that is also a feature name ("the **export** is wrong" when Export is a feature) pulls that feature.
+- Mode detection is lexical. A bug report that names neither an intent nor a listed symptom
+  ("drops captions") is still read as build, but the receipt now marks it `A GUESS` and agents are
+  told to ask. Measured on a real 13-feature project tier with asks written before running (2026-09-27): the
+  tuned 15 at 14/15; a first held-out 10 at 6/10 before the change (2 silent wrong modes, 2 not
+  confident); a second held-out 8, written after the change, at 7/8 with the feature right 8 of 8
+  (the miss is the flagged guess above). A verb that is also a feature name ("the **export** is
+  wrong" when Export is a feature) pulls that feature.
 - Resolution picks one target when the runner-up scores below 85% of the top, even when the ask
   genuinely spans two features.
 - Carry-forward keeps ids for about 4 in 5 of the builder's rewordings, but the audit measured 8 of
@@ -681,7 +720,8 @@ guard-rail that an agent following its instructions will respect and a hostile p
   map alone costs ~7,700 tokens (03-F8/F9). Not fixed (Phase 3).
 - Trials: the eval comparison can fail open when the overlay changes the eval set, and an agent's
   `keep` of an L1 change is denied instead of becoming a proposal (05-F1/F2). Not fixed (Phase 3).
-- Scaffolded project tiers start guard-invalid and install no commit gate (08-F2). Not fixed (Phase 4).
+- A project tier's notes ride the code pull request, so the code review approves them; its
+  `memory-gate` labels the level but does not auto-merge.
 - Kiro and Cursor share one session ledger per checkout; two concurrent sessions there collide.
 - `CORE-SIZE`, token counts in receipts and all "tokens" figures are characters / 3.8 estimates.
 - cairn's own `features/` notes were written by an agent from its own code; review them.
@@ -724,8 +764,8 @@ guard-rail that an agent following its instructions will respect and a hostile p
 
 - The ADRs are short records of each decision; this document is the detailed description and wins
   where they differ.
-- ADR-002 describes L0 pull requests merging automatically. As built, auto-merge is off until the
-  gate has been exercised on GitHub, so every pull request waits for review.
+- ADR-002 describes L0 pull requests merging automatically. As built, that is opt-in:
+  `enforcement.auto_merge_levels` is empty until an owner adds `L0` after proving the gate.
 - ADR-003's recall is a verb; the primary read path is ADR-004's protocol (`mem load`).
 - ADR-003 and ADR-004 are `status: proposed` in the template: accept or revise them for your team.
 

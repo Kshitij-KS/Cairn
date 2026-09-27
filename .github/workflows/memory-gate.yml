@@ -8,7 +8,9 @@
 #   - the base's security tests are run against the PR's guard, so a PR cannot weaken the guard
 #     without this job going red,
 #   - routing runs in a separate job that executes no PR code and fails if labelling fails,
-#   - nothing auto-merges (containment until this gate has been exercised on GitHub).
+#   - a PR merges on its own only when its level is in enforcement.auto_merge_levels of the BASE
+#     revision's policy (empty by default: containment until this gate has been exercised on
+#     GitHub). The sync's pull-request mode relies on this for L0 notes.
 #   - secrets: the guard's SECRET-FILE / SECRET-CONTENT scan runs on every file in the range. The
 #     gitleaks action was removed because it scans the workspace root, which is no longer the PR.
 #
@@ -53,6 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       level: ${{ steps.classify.outputs.level }}
+      automerge: ${{ steps.classify.outputs.automerge }}
     env:
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -105,12 +108,17 @@ jobs:
           case "$LEVEL" in L0|L1|L2|L3) ;; *) echo "::error::classifier returned '$LEVEL'"; exit 1 ;; esac
           echo "level=$LEVEL" >> "$GITHUB_OUTPUT"
           echo "This pull request needs $LEVEL review."
+          # auto-merge levels come from the TRUSTED base policy, never from the PR
+          AUTO=$(LEVEL="$LEVEL" python3 -c 'import json,os; lv=(json.load(open("base/governance/roles.json")).get("enforcement") or {}).get("auto_merge_levels") or []; print("true" if os.environ["LEVEL"] in lv else "false")')
+          echo "automerge=$AUTO" >> "$GITHUB_OUTPUT"
+          echo "Auto-merge for $LEVEL: $AUTO"
 
   route:
     # Executes no PR-controlled code: it only reads the gate's output and calls the GitHub API.
     needs: gate
     runs-on: ubuntu-latest
     permissions:
+      contents: write        # enabling auto-merge needs it; this job runs no PR code
       pull-requests: write
       issues: write
     env:
@@ -118,11 +126,20 @@ jobs:
       GH_REPO: ${{ github.repository }}
       PR: ${{ github.event.pull_request.number }}
       LEVEL: ${{ needs.gate.outputs.level }}
+      AUTOMERGE: ${{ needs.gate.outputs.automerge }}
     steps:
       - name: Label and route (fails if labelling fails)
         run: |
           set -euo pipefail
           gh label create "memory:$LEVEL" --color BFD4F2 --force
           gh label create "needs-review" --color D93F0B --force
-          gh pr edit "$PR" --add-label "memory:$LEVEL" --add-label "needs-review"
-          echo "Containment: no auto-merge. Every PR waits for its CODEOWNERS review."
+          if [ "$AUTOMERGE" = "true" ]; then
+            gh pr edit "$PR" --add-label "memory:$LEVEL"
+            # GitHub merges once every required check passes; CODEOWNERS names no reviewer for
+            # auto-merge levels (memory_guard.py codeowners). Needs "Allow auto-merge" in settings.
+            gh pr merge "$PR" --auto --squash \
+              || echo "::warning::auto-merge could not be enabled: turn on Settings > General > Allow auto-merge"
+          else
+            gh pr edit "$PR" --add-label "memory:$LEVEL" --add-label "needs-review"
+            echo "$LEVEL is not in enforcement.auto_merge_levels: this PR waits for its CODEOWNERS review."
+          fi

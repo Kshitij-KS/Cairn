@@ -35,10 +35,15 @@ Check: the repository on GitHub is **private** and shows `governance/`, `scripts
 
 ## Phase 4 - protect main (10 min, owner, GitHub web)
 
-README 2.5: ruleset on `main` requiring pull requests, Code Owner review, and the checks `gate`,
-`route`, `test`, `windows-sync`; no force pushes. Auto-merge stays off.
+README 2.5: set `enforcement.mode` to `"pr"`; ruleset on `main` requiring pull requests, Code
+Owner review with 0 required approvals, and the checks `gate`, `route`, `test`, `windows-sync`; no
+force pushes.
 Check: the three throwaway pull requests in README 2.5 behave exactly as described. If one does
-not, stop and investigate before anyone relies on the memory.
+not, stop and investigate before anyone relies on the memory. Then an agent's note: end a turn
+after `mem remember "..."`; the sync prints `waiting for review in <pull request>` and `main` is
+untouched.
+Only after that: Allow auto-merge, `"auto_merge_levels": ["L0"]`, `codeowners --write`. Check: the
+next journal-note pull request merges on its own once `gate` passes; a `features/` edit does not.
 
 ## Phase 5 - verify on your machine (5 min)
 
@@ -49,8 +54,8 @@ uv run -q --script scripts/mem.py recall "notes are data"
 ```
 
 Check: `pre` prints "memory synced"; `load` prints a receipt starting `Context ·` with orient mode;
-`recall` ranks a fact from `CORE.md` first. Windows: `py tools\test_sync.py` ends "0 failed", then
-`setx MEMORY_SYNC_WINDOWS_POST 1`.
+`recall` ranks a fact from `CORE.md` first. Windows: `py tools\test_sync.py` ends "0 failed"
+(`setx MEMORY_SYNC_WINDOWS_POST 0` pauses agents' auto-commit on a machine if you ever need to).
 
 ## Phase 6 - connect the AI clients (10 min)
 

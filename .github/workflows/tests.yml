@@ -41,9 +41,10 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Sync scenarios against sync-memory.ps1
+      - name: Sync and scaffold scenarios against the PowerShell scripts
         shell: pwsh
         run: |
           git config --global user.email "ci@example.invalid"
           git config --global user.name "ci"
           python tools/test_sync.py --impl powershell
+          python tools/test_scaffold.py --impl powershell

@@ -4,11 +4,11 @@
   "org": "__ORG__",
   "repo": "__REPO__",
   "enforcement": {
-    "$comment": "mode=direct: agents commit and push straight to the default branch (correct before branch protection exists). mode=pr: the intended mode once main is protected, where every change arrives as a pull request. The sync scripts do not read this field yet, and memory-gate.yml does not auto-merge; auto_merge_levels is reserved for that. Switch to `pr` the day you enable branch protection on main.",
+    "$comment": "mode=direct: agents' end-of-turn syncs push straight to the default branch (right before branch protection exists). mode=pr: the sync pushes each person's notes to their own branch memory/<who> and keeps one pull request open for it (sync-memory.py, read from the trusted HEAD policy); in direct mode a push refused by a protected branch falls back to the same. auto_merge_levels: levels memory-gate may merge without a person (it enables GitHub auto-merge; CODEOWNERS then names no reviewer for those levels). Switch mode to `pr` the day you protect main; add L0 here only after the gate has been proven on GitHub.",
     "mode": "direct",
     "auto_merge_levels": [],
     "block_on_warning": false,
-    "$comment_containment": "2026-09-25 audit containment: L0 auto-merge is paused (empty list) until the gate runs from the trusted base revision and has been exercised on GitHub."
+    "$comment_containment": "Empty by default: nothing merges without review until an owner adds a level after proving the gate on GitHub (RUNBOOK phase 4)."
   },
   "levels": {
     "$comment": "The core of the model. A note declares its level in frontmatter (`level: L0`). The guard also infers the level from the path and FAILS if the declaration and the path disagree — so a note cannot smuggle strategy into the code tier.",

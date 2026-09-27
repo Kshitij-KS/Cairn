@@ -261,10 +261,14 @@ def test_resolve_and_modes():
 
 def test_round1_fixes():
     print("\nfixes from early testing (symptoms, phrase aliases, orient + target)")
-    for ask in ("the spreadsheet export is too slow", "the xlsx has no output", "the writer keeps dropping rows"):
+    for ask in ("the spreadsheet export is too slow", "the xlsx has no output", "the writer keeps dropping rows",
+                "the export job is red in CI", "the summary invents a figure"):
         rc, out = run("resolve", ask, "--json")
         ok("a symptom with no intent word reads as debug: %r" % ask, json.loads(out)["mode"] == "debug",
            json.loads(out)["mode"])
+    rc, out = run("resolve", "the writer and the header row", "--json")
+    ok("an ask with no intent word and no symptom is build, and the reason says it is a guess",
+       json.loads(out)["mode"] == "build" and "GUESS" in json.dumps(json.loads(out)), out[:200])
     # a team's own symptom words come from roles.json protocol.extra_symptoms (read from HEAD)
     ask = "the spreadsheet preview is too quiet"
     rc, out = run("resolve", ask, "--json")
@@ -698,7 +702,7 @@ def main():
     return 0 if passed == len(RESULTS) == EXPECTED else 1
 
 
-EXPECTED = 99
+EXPECTED = 102
 
 
 if __name__ == "__main__":

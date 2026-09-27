@@ -1,0 +1,97 @@
+# memory-gate for the __PROJECT_NAME__ project memory (memory/), installed by Cairn's
+# scripts/new-project-memory. It judges only pull requests that touch memory/, the same way the
+# company tier's gate does: the TRUSTED base revision's guard and policy judge the PR as data, so a
+# pull request cannot weaken the guard that judges it. The level it needs is labelled on the PR;
+# who must review it is in the memory block of .github/CODEOWNERS.
+name: memory-gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "memory/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: memory-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      level: ${{ steps.classify.outputs.level }}
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      MEMORY_POLICY_REF: ${{ github.event.pull_request.base.sha }}
+      MEMORY_ACTOR_KIND: human
+    steps:
+      - name: Check out the trusted base revision (its code judges the PR)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+
+      - name: Check out the PR as data
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: head
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: A base without a project memory has nothing to judge with yet
+        id: present
+        run: |
+          if [ -f base/memory/scripts/memory_guard.py ]; then echo "present=true" >> "$GITHUB_OUTPUT"
+          else echo "present=false" >> "$GITHUB_OUTPUT"; echo "::notice::memory/ arrives in this PR; an owner reviews it by hand."; fi
+
+      - name: Safety, format and per-commit attribution (base guard, base policy, PR data)
+        if: steps.present.outputs.present == 'true'
+        run: |
+          set -euo pipefail
+          python base/memory/scripts/memory_guard.py --notes-root head/memory \
+            check --range "$BASE_SHA...$HEAD_SHA" --policy-ref "$BASE_SHA" --no-access
+
+      - name: The memory block of CODEOWNERS is generated from the trusted policy
+        if: steps.present.outputs.present == 'true'
+        run: python base/memory/scripts/memory_guard.py --notes-root head/memory codeowners
+
+      - name: Classify the level this PR needs
+        id: classify
+        if: steps.present.outputs.present == 'true'
+        run: |
+          set -euo pipefail
+          LEVEL=$(python base/memory/scripts/memory_guard.py --notes-root head/memory \
+            classify --range "$BASE_SHA...$HEAD_SHA" --policy-ref "$BASE_SHA")
+          case "$LEVEL" in L0|L1|L2|L3) ;; *) echo "::error::classifier returned '$LEVEL'"; exit 1 ;; esac
+          echo "level=$LEVEL" >> "$GITHUB_OUTPUT"
+          echo "This pull request's memory change needs $LEVEL review."
+
+  route:
+    # Executes no PR-controlled code: it only reads the gate's output and calls the GitHub API.
+    needs: gate
+    if: needs.gate.outputs.level != ''
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      LEVEL: ${{ needs.gate.outputs.level }}
+    steps:
+      - name: Label the level
+        run: |
+          set -euo pipefail
+          gh label create "memory:$LEVEL" --color BFD4F2 --force
+          gh pr edit "$PR" --add-label "memory:$LEVEL"

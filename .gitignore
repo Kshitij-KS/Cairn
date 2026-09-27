@@ -30,4 +30,4 @@ web/data/graph.full.json
 .memory/
 __pycache__/
 web/test/.work/
-web/test/node_modules/
+web/test/node_modules

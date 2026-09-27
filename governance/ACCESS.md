@@ -149,7 +149,7 @@ person joins, not after.
 1. Run `scripts/init.py`, then fill in `governance/roles.json`: your people, their GitHub logins, roles.
 2. Regenerate `.github/CODEOWNERS` from the owners in `roles.json` with `memory_guard.py codeowners --write`.
 3. Settings → Branches → protect `main`: require a PR, require review from Code Owners, require the `memory-gate` status check, and do not allow bypass.
-4. Once `main` is protected, direct pushes are refused, so every change, an agent's included, goes through a pull request and waits for its Code Owner's review. (`enforcement.mode` records the intent; the sync scripts do not read it yet.)
+4. Set `enforcement.mode` to `"pr"`. Once `main` is protected, each person's sync pushes their notes to their own branch `memory/<who>` and keeps one pull request open for it; every change waits for its Code Owner's review, unless its level is in `enforcement.auto_merge_levels` (add `L0` only after the gate has been proven on GitHub, then regenerate CODEOWNERS).
 5. `scripts/memory_guard.py explain --actor <handle>` prints exactly what that person may change. Run it for each teammate once, so nobody discovers their boundary during an incident.
 
 ## Observations

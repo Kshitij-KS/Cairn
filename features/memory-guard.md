@@ -20,7 +20,8 @@ Memory Guard is the enforcement engine every write passes through at commit: it 
 Exit codes are a public interface: 0 ok, 3 secret, 4 access denied, 5 invalid. A note's level is a pure function of its path and governance/roles.json. A claim id, once assigned, is never reassigned to different text in another note.
 
 ## Observations
-- [constraint] The guard trusts MEMORY_ACTOR_KIND; the real boundary is review plus branch protection on the remote ^996ee7
+- [constraint] The guard ignores MEMORY_ACTOR_KIND=human or bot inside an agent runtime with no terminal; a process can still drop the markers, so the real boundary is review plus branch protection on the remote ^996ee7
+- [fact] codeowners writes a level-aware file once enforcement.auto_merge_levels is set, and only a marked memory block in a project tier ^4adfa1
 - [fact] With no MEMORY_ACTOR_KIND set, an agent runtime marker in the environment (CLAUDE_CODE_SESSION_ID and others) makes the actor an agent ^7451c1
 - [fact] Run from a code repo's root, the notes root is ./memory when it holds .basic-memory/project.json ^85a13c
 

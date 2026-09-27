@@ -17,7 +17,7 @@ updated: 2026-09-27
 Project Scaffolding creates a project tier inside a code repo: memory/ with its own notes, policy, guard, protocol and sync scripts, plus the agent configs for Claude Code, Kiro and Cursor.
 
 ## Contract
-Never overwrites an existing file; configs that already exist get a .team-memory.suggested file to merge by hand.
+Never overwrites an existing file; files that already exist get a .team-memory.suggested file to merge by hand, and a second run changes nothing. Installs a memory-gate workflow scoped to memory/ and the memory block of the repository's CODEOWNERS.
 
 ## Observations
 - [gotcha] Before 2026-09-23 the scaffold did not copy memory_guard.py, so project tiers ran with policy unenforced ^205493
