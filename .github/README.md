@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/social-preview.png" alt="Cairn: shared, governed memory for your team's AI agents" width="720">
+
 # Cairn
 
 **Shared, governed memory for your team's AI agents.**
@@ -39,6 +41,37 @@ and writes to after**, with rules that are *enforced* rather than requested:
   tier.
 
 > A cairn is the stack of stones hikers leave to mark the trail for whoever comes next.
+
+## What it looks like
+
+Your first message in a session, in Claude Code, with the context loaded before the agent starts:
+
+```text
+you   > the export job times out on large accounts
+
+Context · main@4f1c2a · debug mode (no intent word; 'times out' reads like a symptom)
+  core ............. Core  [full]
+  target ........... Export  [full]
+  relies on ........ Transform, Sources  [full]
+  recent history ... 2026-10-02 Export Needs 8GB For Large Accounts  [full]
+  playbook ......... PB-7K3F Raise The Export Worker Memory [reproduced] · /playbook-run PB-7K3F
+  5 notes · ~2100 new tokens (estimate)
+```
+
+When it cannot tell what you mean, it asks instead of guessing:
+
+```text
+What kind of task is this (about Export)?
+  1. Build something new (best guess)      2. Fix something that is wrong
+  3. Change, rename or remove something    4. Understand why it is this way
+```
+
+And when an agent tries to change something it may not:
+
+```text
+[FAIL ACCESS-LEVEL] context/tooling-stack.md is L2 (steward); you are acting as agent, capped at L0
+  -> write the change as a proposal instead: log/proposals/PROPOSAL - <what>.md
+```
 
 ## Contents
 

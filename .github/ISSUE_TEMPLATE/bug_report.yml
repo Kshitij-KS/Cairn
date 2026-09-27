@@ -1,0 +1,35 @@
+name: Bug report
+description: Something Cairn did that it should not have, or did not do that it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce it
+      description: The commands you ran, and their output. A failing check in the style of tools/test_*.py is the best bug report there is.
+      render: shell
+    validations:
+      required: true
+  - type: dropdown
+    id: client
+    attributes:
+      label: AI client
+      options: [Claude Code, Claude Desktop, Kiro, Cursor, none (command line), other]
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, macOS, Linux]
+  - type: checkboxes
+    id: private
+    attributes:
+      label: Before you post
+      options:
+        - label: I removed anything private from the output (names, emails, note text, keys). Security problems go to SECURITY.md, not here.
+          required: true

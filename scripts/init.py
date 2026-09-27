@@ -31,6 +31,7 @@ import collections
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -41,7 +42,8 @@ MANIFEST = os.path.join(ROOT, ".basic-memory", "project.json")
 NOTE_ROOTS = ("CORE.md", "README.md", "RUNBOOK.md", "ARCHITECTURE.md", "CLAUDE.md", "context", "decisions",
               "features", "projects", "log", "governance")
 
-TEMPLATE_ONLY = (".github/README.md", ".github/CONTRIBUTING.md", ".github/SECURITY.md")
+TEMPLATE_ONLY = (".github/README.md", ".github/CONTRIBUTING.md", ".github/SECURITY.md", ".github/ISSUE_TEMPLATE",
+                 ".github/pull_request_template.md", ".github/assets")
 
 EMAIL_RX = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 GITHUB_RX = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
@@ -170,7 +172,11 @@ def main(argv):
     # LICENSE, LICENSE-NOTES and NOTICE stay: the licences require them.
     gone = [f for f in TEMPLATE_ONLY if os.path.exists(os.path.join(ROOT, f))]
     for f in gone:
-        os.remove(os.path.join(ROOT, f))
+        target = os.path.join(ROOT, f)
+        if os.path.isdir(target):
+            shutil.rmtree(target)
+        else:
+            os.remove(target)
     print("  template      removed %s" % (", ".join(gone) or "nothing (already gone)"))
 
     # 3. Basic Memory project name

@@ -1,0 +1,15 @@
+name: Idea or feature request
+description: Something that would make Cairn more useful for your team
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem, in your words
+      description: What were you trying to do, and what got in the way? The problem matters more than the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like instead

@@ -879,7 +879,7 @@ Things worth trying to break, each with the expected result:
 | `scripts/new-project-memory.sh/.ps1` | 101 / 112 | project scaffold |
 | `playbooks/`, `decisions/ADR-005-playbooks.md` | - | the playbook folder note and the decision record |
 | `scripts/init.py` | 219 | turns the template into an instance: owner row, placeholders, git identity, CODEOWNERS, stamps, removes template-only files |
-| `LICENSE`, `LICENSE-NOTES`, `NOTICE`, `.github/README.md`, `.github/CONTRIBUTING.md`, `.github/SECURITY.md` | - | the licences (Apache-2.0 for code, MIT-0 for notes, templates and agent configuration; `NOTICE` has the split) and the open-source front page; `init.py` removes the three `.github/` files in an instance |
+| `LICENSE`, `LICENSE-NOTES`, `NOTICE`, `.github/README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `ISSUE_TEMPLATE/`, `pull_request_template.md`, `assets/` | - | the licences (Apache-2.0 for code, MIT-0 for notes, templates and agent configuration; `NOTICE` has the split) and the open-source project's front page, contribution files and social preview; `init.py` removes the `.github/` ones in an instance |
 | `governance/roles.json` | 478 | all policy |
 | `governance/ACCESS.md`, `SIGNIFICANCE.md` | 171 / 125 | policy in prose |
 | `CLAUDE.md`, `.cursor/rules/memory.mdc`, `.kiro/steering/memory.md` | 203 / 83 / 80 | agent rules |
