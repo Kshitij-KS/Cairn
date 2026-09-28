@@ -1,0 +1,157 @@
+@import "tailwindcss";
+
+/* Tokens. The bare :root holds the light palette; dark redefines only the tokens, both for the
+   system preference (unless the person chose light) and for an explicit choice. Components use
+   the tokens through Tailwind's theme below, never raw colours. */
+:root {
+  --bg: #fafafa;
+  --bg-subtle: #f4f4f5;
+  --panel: #ffffff;
+  --panel-2: #f9f9fa;
+  --fg: #09090b;
+  --fg-2: #3f3f46;
+  --muted: #71717a;
+  --faint: #a1a1aa;
+  --line: rgba(9, 9, 11, 0.08);
+  --line-2: rgba(9, 9, 11, 0.14);
+  --ring: rgba(9, 9, 11, 0.9);
+  --hover: rgba(9, 9, 11, 0.045);
+  --press: rgba(9, 9, 11, 0.08);
+  --grid: rgba(9, 9, 11, 0.07);
+  --l0: #2563eb;
+  --l1: #059669;
+  --l2: #d97706;
+  --l3: #e11d48;
+  --flag: #b45309;
+  --ok: #047857;
+  --edge: rgba(9, 9, 11, 0.28);
+  --edge-dep: rgba(9, 9, 11, 0.55);
+  --shadow-sm: 0 1px 2px rgba(9, 9, 11, 0.05), 0 0 0 1px var(--line);
+  --shadow-md: 0 1px 2px rgba(9, 9, 11, 0.04), 0 4px 12px -2px rgba(9, 9, 11, 0.07), 0 0 0 1px var(--line);
+  --shadow-lg: 0 2px 4px rgba(9, 9, 11, 0.04), 0 16px 40px -8px rgba(9, 9, 11, 0.16), 0 0 0 1px var(--line);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #09090b; --bg-subtle: #0f0f12; --panel: #111113; --panel-2: #161619;
+    --fg: #fafafa; --fg-2: #d4d4d8; --muted: #a1a1aa; --faint: #71717a;
+    --line: rgba(255, 255, 255, 0.07); --line-2: rgba(255, 255, 255, 0.12); --ring: rgba(250, 250, 250, 0.92);
+    --hover: rgba(255, 255, 255, 0.05); --press: rgba(255, 255, 255, 0.09); --grid: rgba(255, 255, 255, 0.055);
+    --l0: #60a5fa; --l1: #34d399; --l2: #fbbf24; --l3: #fb7185; --flag: #fbbf24; --ok: #34d399;
+    --edge: rgba(255, 255, 255, 0.22); --edge-dep: rgba(255, 255, 255, 0.5);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--line);
+    --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 14px -2px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--line);
+    --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.3), 0 20px 50px -10px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--line);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #09090b; --bg-subtle: #0f0f12; --panel: #111113; --panel-2: #161619;
+  --fg: #fafafa; --fg-2: #d4d4d8; --muted: #a1a1aa; --faint: #71717a;
+  --line: rgba(255, 255, 255, 0.07); --line-2: rgba(255, 255, 255, 0.12); --ring: rgba(250, 250, 250, 0.92);
+  --hover: rgba(255, 255, 255, 0.05); --press: rgba(255, 255, 255, 0.09); --grid: rgba(255, 255, 255, 0.055);
+  --l0: #60a5fa; --l1: #34d399; --l2: #fbbf24; --l3: #fb7185; --flag: #fbbf24; --ok: #34d399;
+  --edge: rgba(255, 255, 255, 0.22); --edge-dep: rgba(255, 255, 255, 0.5);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 1px var(--line);
+  --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 14px -2px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--line);
+  --shadow-lg: 0 2px 4px rgba(0, 0, 0, 0.3), 0 20px 50px -10px rgba(0, 0, 0, 0.7), 0 0 0 1px var(--line);
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --color-bg: var(--bg);
+  --color-subtle: var(--bg-subtle);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-hover: var(--hover);
+  --color-press: var(--press);
+  --color-l0: var(--l0);
+  --color-l1: var(--l1);
+  --color-l2: var(--l2);
+  --color-l3: var(--l3);
+  --color-flag: var(--flag);
+  --color-ok: var(--ok);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --ease-out: var(--ease-out);
+  --ease-in-out: var(--ease-in-out);
+}
+
+/* Base rules sit in the base layer, so a utility on an element (outline-none, say) can
+   still override them. Unlayered CSS would beat every utility. */
+@layer base {
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "cv11", "ss01";
+}
+* { -webkit-tap-highlight-color: transparent; }
+:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 6px; }
+::selection { background: color-mix(in srgb, var(--l0) 28%, transparent); }
+}
+
+/* the canvas: a quiet dot grid, an instrument's graticule */
+.canvas-grid {
+  background-color: var(--bg-subtle);
+  background-image: radial-gradient(circle at 1px 1px, var(--grid) 1px, transparent 0);
+  background-size: 22px 22px;
+}
+
+/* Pressable things answer on press (Emil: 0.97, fast, ease-out). */
+.pressable { transition: transform 160ms var(--ease-out), background-color 150ms ease, color 150ms ease, box-shadow 150ms ease, opacity 150ms ease; }
+.pressable:active { transform: scale(0.97); }
+
+/* Radix popovers scale from their trigger, not from their own centre. */
+.from-trigger { transform-origin: var(--radix-tooltip-content-transform-origin, var(--radix-hover-card-content-transform-origin, var(--radix-dropdown-menu-content-transform-origin, center))); }
+@keyframes pop-in { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: none; } }
+@keyframes pop-out { to { opacity: 0; transform: scale(0.97); } }
+.pop[data-state="delayed-open"], .pop[data-state="open"] { animation: pop-in 150ms var(--ease-out); }
+.pop[data-state="instant-open"] { animation: none; }
+.pop[data-state="closed"] { animation: pop-out 100ms ease-out; }
+
+@keyframes dialog-in { from { opacity: 0; transform: translate(-50%, -48%) scale(0.96); } to { opacity: 1; transform: translate(-50%, -50%); } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+.dialog-content[data-state="open"] { animation: dialog-in 200ms var(--ease-out); }
+.dialog-overlay[data-state="open"] { animation: fade-in 200ms var(--ease-out); }
+
+/* skeleton */
+@keyframes shimmer { to { background-position: -200% 0; } }
+.skeleton { background: linear-gradient(90deg, var(--hover) 25%, var(--press) 50%, var(--hover) 75%); background-size: 200% 100%; animation: shimmer 1.4s linear infinite; border-radius: 8px; }
+
+/* live dot */
+@keyframes live { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+.live { animation: live 2.4s ease-in-out infinite; }
+
+/* the direction a change travels along a dependency */
+@keyframes flow { to { stroke-dashoffset: -20; } }
+.edge-flow { stroke-dasharray: 4 6; animation: flow 900ms linear infinite; }
+
+/* a withheld line of text */
+.scrollbar-thin { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+  .edge-flow { animation: none; stroke-dasharray: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass { backdrop-filter: none !important; background: var(--panel) !important; }
+}

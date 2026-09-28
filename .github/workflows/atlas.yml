@@ -58,8 +58,8 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Rendered-page privacy tests (jsdom, pinned by package-lock.json)
-        run: cd web/test && npm ci --no-audit --no-fund && npm test
+      - name: Rendered-page privacy tests (jsdom, pinned by web/package-lock.json), on a current build
+        run: cd web && npm ci --no-audit --no-fund && npm run check-build && npm test
 
       - name: Generate the published map
         run: python scripts/build_atlas.py --out web/data/graph.json

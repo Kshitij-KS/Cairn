@@ -515,10 +515,31 @@ def test_author_kept():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-EXPECTED = 49  # a run that silently stops early must not pass (expected-count check)
+EXPECTED = 53  # a run that silently stops early must not pass (expected-count check)
+
+
+def test_secret_prefix_boundary():
+    print("\nsecret scan: a key prefix must start a token")
+    body = "A1b2C3d4E5f6G7h8I9j0K1l2"
+    cases = [
+        ("a bare sk- key is caught (exit 3)", "the key is " + "sk-" + body, True),
+        ("an sk-proj- key after punctuation is caught (exit 3)", "(" + "sk-proj-" + body + ")", True),
+        ("negative: the CSS name 'mask-image-linear-to-color' is NOT a key", "the class mask-image-linear-to-color here", False),
+        ("negative: 'risk-assessment-framework-document' is NOT a key", "see the risk-assessment-framework-document", False),
+    ]
+    for label, text, secret in cases:
+        tmp, root, notes = fresh()
+        try:
+            write(os.path.join(notes, "log", "journal", "k.md"), NOTE.replace("How exporting works.", text).replace("Export Notes", "K"))
+            sh(root, "git", "add", "-A")
+            rc, out = guard(notes, "check", "--staged", "--no-attribution", env=AGENT)
+            ok(label, (rc == 3 and "SECRET" in out) if secret else ("SECRET" not in out), "rc=%d %s" % (rc, out[-160:]))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 def main():
+    test_secret_prefix_boundary()
     test_policy_self_demotion()
     test_empty_policy()
     test_rename_and_case()

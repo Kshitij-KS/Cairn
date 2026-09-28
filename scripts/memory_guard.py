@@ -737,9 +737,11 @@ SECRET_FILE_RE = re.compile(
     r"(^|/)\.env($|\.)|\.(pem|key|p12|pfx|jks)$|(^|/)id_(rsa|dsa|ecdsa|ed25519)$|credentials\.json$",
     re.I,
 )
+# Key prefixes must start a token: "sk-" inside a word ("mask-image-linear-to-color", a CSS
+# name in the Atlas's own built page, or "risk-assessment-...") is not a key.
 SECRET_CONTENT = [
-    (r"sk-[A-Za-z0-9_\-]{20,}", "OpenAI-style API key"),
-    (r"sk-ant-[A-Za-z0-9_\-]{20,}", "Anthropic API key"),
+    (r"(?<![A-Za-z0-9_])sk-[A-Za-z0-9_\-]{20,}", "OpenAI-style API key"),
+    (r"(?<![A-Za-z0-9_])sk-ant-[A-Za-z0-9_\-]{20,}", "Anthropic API key"),
     (r"AKIA[0-9A-Z]{16}", "AWS access key id"),
     (r"ASIA[0-9A-Z]{16}", "AWS temporary access key id"),
     (r"gh[pousr]_[A-Za-z0-9]{30,}", "GitHub token"),

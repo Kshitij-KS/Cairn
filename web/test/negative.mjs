@@ -1,127 +1,98 @@
-/* Break each invariant on purpose and confirm the check goes red, then confirm the reduced-motion path still renders a usable page. */
-import { boot, withheldMarkers, privacyLeaks } from "./harness.mjs";
+/* Break each invariant on purpose and confirm its check goes red. A check that has never been
+ * seen to fail has not been shown to check anything. */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { boot, settle, dblclick, partitionProblems, expectedLineage, shownLineage, sameSet, withheldMarkers, privacyLeaks } from "./harness.mjs";
+import { labelProblems, crowding, snap } from "./sky-checks.mjs";
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TMP = path.join(HERE, ".work");
-fs.mkdirSync(TMP, { recursive: true }); // a fresh checkout has no .work/: the first run died on ENOENT
-// Fixtures live beside the tests. Generate the synthetic ones with
-// tools/gen_fixture.py, then build each with scripts/build_atlas.py.
+fs.mkdirSync(TMP, { recursive: true });
 const FIX = (n) => path.join(HERE, "fixtures", n);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
 const ok = (n, c, d = "") => { c ? pass++ : fail++; console.log((c ? "  PASS " : "  FAIL ") + n + (d ? "  " + d : "")); };
 
-const src = JSON.parse(fs.readFileSync(FIX("n1020.json"), "utf8"));
-
-// 1. overfill a leaf cluster and confirm the cap check would catch it
+// 1. the partition check sees a note that vanished from the grid, and one drawn twice
 {
-  const d = JSON.parse(JSON.stringify(src));
-  const leaf = (function find(cs) {
-    for (const c of cs) { if (c.members?.length) return c; const r = find(c.children || []); if (r) return r; }
-    return null;
-  })(d.arrangements.area.clusters);
-  const extra = d.nodes.slice(0, 200).map((n) => n.id);
-  leaf.members = [...new Set([...leaf.members, ...extra])];
-  leaf.count = leaf.members.length;
-  for (const id of extra) if (!leaf.pos[id]) leaf.pos[id] = [Math.random() * 2 - 1, Math.random() * 2 - 1];
-  fs.writeFileSync(path.join(TMP, "bad-cap.json"), JSON.stringify(d));
-  const { win, doc } = await boot(path.join(TMP, "bad-cap.json"));
-  const live = (s) => [...doc.querySelectorAll(s)].filter((e) => !e.classList.contains("leaving"));
-  // drill to that leaf
-  for (let i = 0; i < 6; i++) {
-    const g = live("g.cl:not(.dim):not(.container)");
-    if (!g.length) break;
-    g.map((el) => ({ el, n: +el.querySelector(".cl-count").textContent }))
-      .sort((a, b) => b.n - a.n)[0].el.dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
-    await sleep(900);
-  }
-  const n = live("g.nd").length;
-  // and at least one note must be reached, or this passes by never reaching any notes at all
-  ok("the cap is enforced in the CLIENT too, not only the builder",
-     n > 0 && n <= d.arrangements.area.cap,
-     `a cluster claiming ${leaf.count} members drew ${n}`);
+  const g = JSON.parse(fs.readFileSync(FIX("n120.json"), "utf8"));
+  const { win, doc } = await boot(FIX("n120.json"), { hash: "#grid:area" });
+  ok("partition: clean before sabotage", partitionProblems(doc, g).length === 0);
+  const chip = doc.querySelector('[data-view="map"] [data-note]');
+  const clone = chip.cloneNode(true);
+  chip.parentElement.appendChild(clone);
+  ok("negative: a note drawn twice is caught", partitionProblems(doc, g).some((p) => p.startsWith("drawn twice")));
+  clone.remove(); chip.remove();
+  ok("negative: a note missing from the grid is caught", partitionProblems(doc, g).some((p) => p.includes("visible notes")));
   win.close();
 }
 
-// 2. confirm the label check can go red: force every label on at a dense level
+// 2. the lineage check sees a neighbour in the wrong column
 {
-  const { win, doc } = await boot(FIX("n1020.json"));
-  const live = (s) => [...doc.querySelectorAll(s)].filter((e) => !e.classList.contains("leaving"));
-  for (let i = 0; i < 6; i++) {
-    const g = live("g.cl:not(.dim):not(.container)");
-    if (!g.length) break;
-    g.map((el) => ({ el, n: +el.querySelector(".cl-count").textContent }))
-      .sort((a, b) => b.n - a.n)[0].el.dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
-    await sleep(900);
-  }
-  const minor = live("g.nd.minor").length, total = live("g.nd").length;
-  ok("the thinning pass actually parks labels at density", minor > 0 && minor < total,
-     `${minor} of ${total} parked — if this were 0 the legibility check would be vacuous`);
+  const g = JSON.parse(fs.readFileSync(FIX("graph.json"), "utf8"));
+  const id = "features/context-protocol";
+  const { win, doc } = await boot(FIX("graph.json"), { hash: "#grid:area~" + encodeURIComponent(id) + "!focus" });
+  await settle(win, 200);
+  const want = expectedLineage(g, id);
+  ok("lineage: the real page matches before sabotage", sameSet(shownLineage(doc).reliedOnBy, want.reliedOnBy) && want.reliedOnBy.size > 0);
+  const el = doc.querySelector('[data-lineage="right"][data-present]');
+  el.setAttribute("data-lineage", "left");
+  const shown = shownLineage(doc);
+  ok("negative: a dependent shown on the relied-on side is caught", !sameSet(shown.reliedOnBy, want.reliedOnBy) && !sameSet(shown.reliesOn, want.reliesOn));
+  el.removeAttribute("data-present"); el.setAttribute("data-lineage", "right");
+  ok("negative: a neighbour still leaving (not present) is not counted", !sameSet(shownLineage(doc).reliedOnBy, want.reliedOnBy));
   win.close();
 }
 
-// 3. reduced motion: the page must be fully usable with nothing moving
+// 3. the sky's geometry checks see a collision and a crowd
 {
-  const { win, doc, errors } = await boot(FIX("n1020.json"), { reducedMotion: true });
-  const live = (s) => [...doc.querySelectorAll(s)].filter((e) => !e.classList.contains("leaving"));
-  ok("reduced motion boots clean", errors.length === 0, errors.slice(0, 1).join(""));
-  ok("reduced motion still draws the map", live("g.cl").length >= 2, `${live("g.cl").length} groups`);
-  ok("the motion switch hides itself when the OS already said no",
-     doc.querySelector("#motion-row").hidden === true);
-  ok("with reduced motion no light runs along the edges", doc.querySelectorAll(".packet").length === 0);
-  const g = live("g.cl:not(.dim):not(.container)")[0];
-  g.dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
-  await sleep(120);                                  // no transition to wait for
-  ok("navigation is instant with motion off",
-     live("g.nd").length + live("g.cl:not(.dim):not(.container)").length > 0,
-     `${live("g.nd").length} notes, ${live("g.cl:not(.dim):not(.container)").length} groups after 120ms`);
+  const { win } = await boot(FIX("n120.json"));
+  for (let i = 0; i < 8 && win.__atlasSky.snapshot().k < 1; i++) { win.document.querySelector('[aria-label="Zoom in"]').click(); win.__atlasSky.settle(); }
+  const s = snap(win);
+  ok("sky: clean before sabotage", labelProblems(s).length === 0 && crowding(s).length === 0 && s.labels.length > 1);
+  const a = JSON.parse(JSON.stringify(s));
+  const l0 = a.labels.find((l) => l.kind === "note") || a.labels[0];
+  a.labels.push({ ...l0, id: "intruder", x: l0.x + 4 });
+  ok("negative: two names on top of each other are caught", labelProblems(a).some((p) => p.includes("intruder")));
+  const b = JSON.parse(JSON.stringify(s));
+  const star = b.stars.find((x) => !b.labels.some((l) => l.id === x.id)) || b.stars[1];
+  const lab = b.labels.find((l) => l.kind === "note" && l.id !== star.id);
+  lab.x = star.x - 2; lab.y = star.y - 2;
+  ok("negative: a name laid over another star is caught", labelProblems(b).some((p) => p.includes("covers the star")));
+  const c = JSON.parse(JSON.stringify(s));
+  c.stars[1].x = c.stars[0].x + 1; c.stars[1].y = c.stars[0].y;
+  ok("negative: two stars nearly on top of each other are caught", crowding(c).length > 0);
   win.close();
 }
 
-// 4. a corpus with no arrangements at all must say so rather than render nothing
-{
-  const d = JSON.parse(JSON.stringify(src));
-  delete d.arrangements;
-  fs.writeFileSync(path.join(TMP, "bad-old.json"), JSON.stringify(d));
-  const { doc, win } = await boot(path.join(TMP, "bad-old.json"));
-  ok("an out-of-date data file explains itself",
-     doc.body.textContent.includes("too old"), doc.querySelector("#boot h2")?.textContent || "");
-  win.close();
-}
-
-// privacy oracle can fail (audit 07-F5): render a withheld body line through a title
+// 4. the privacy oracle sees a withheld string rendered into the page, in both views
 {
   const pub = JSON.parse(fs.readFileSync(FIX("graph.json"), "utf8"));
   const full = JSON.parse(fs.readFileSync(FIX("graph.full.json"), "utf8"));
   const markers = withheldMarkers(pub, full);
   ok("oracle: the template corpus yields withheld markers", markers.length > 0, `${markers.length}`);
   const leaky = JSON.parse(JSON.stringify(pub));
-  leaky.arrangements.area.clusters[0].label = markers[0];  // top-level cluster labels are always drawn
-  fs.writeFileSync(path.join(TMP, "leaky.json"), JSON.stringify(leaky));
-  const { win, doc } = await boot(path.join(TMP, "leaky.json"));
-  await sleep(600);
-  doc.dispatchEvent(new win.KeyboardEvent("keydown", { key: "/", bubbles: true }));
-  const leaks = privacyLeaks(doc, markers);
-  ok("negative: a withheld string rendered into the page is caught", leaks.length > 0, `${leaks.length} leak(s)`);
+  leaky.nodes[0].tags = [...(leaky.nodes[0].tags || []), markers[0]];
+  const f = path.join(TMP, "leaky.json");
+  fs.writeFileSync(f, JSON.stringify(leaky));
+  const { win, doc } = await boot(f, { hash: "#grid:area~" + encodeURIComponent(leaky.nodes[0].id) });
+  await settle(win, 150);
+  ok("negative: a withheld string rendered into the page is caught", privacyLeaks(doc, markers).length > 0);
   win.close();
 }
-
-// ...and a SHORT secret name, the class the old 24-character floor could never catch (07-F5)
 {
   const pub = JSON.parse(fs.readFileSync(FIX("redacted.json"), "utf8"));
   const full = JSON.parse(fs.readFileSync(FIX("redacted.full.json"), "utf8"));
   const markers = withheldMarkers(pub, full);
   const short = markers.filter((m) => m.length < 24);
   const leaky = JSON.parse(JSON.stringify(pub));
-  leaky.arrangements.area.clusters[0].label = short[0] || "";
-  fs.writeFileSync(path.join(TMP, "leaky-short.json"), JSON.stringify(leaky));
-  const { win, doc } = await boot(path.join(TMP, "leaky-short.json"));
-  await sleep(600);
-  const leaks = privacyLeaks(doc, markers);
-  ok("negative: a short restricted title rendered into the page is caught", short.length > 0 && leaks.length > 0,
-     `${short.length} short markers, ${leaks.length} leak(s)`);
+  leaky.nodes[0].title = short[0] || "";
+  const f = path.join(TMP, "leaky-short.json");
+  fs.writeFileSync(f, JSON.stringify(leaky));
+  const { win, doc } = await boot(f, { hash: "#area~" + encodeURIComponent(leaky.nodes[0].id) });
+  await settle(win, 150);
+  ok("negative: a short restricted title rendered into the page is caught", short.length > 0 && privacyLeaks(doc, markers).length > 0,
+     `${short.length} short markers`);
   win.close();
 }
 

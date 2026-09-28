@@ -25,7 +25,8 @@ A public build never contains a restricted note, a trial or eval body, any note 
 - [fact] A note with public_title or publish_title false is published under an opaque id and path; relations to it resolve by its real title ^c142ec
 - [fact] Activity publishes only the public paths of published notes, never code paths or a note's earlier path ^539fa4
 - [fact] --verify compares with a fresh build by default and never trusts the file's own publication block ^735f09
-- [decision] Since 2026-09-28 the page is an observatory instrument: glass controls over a lit map, Instrument Serif and Sans, one orchid signal colour, springs for touch and light running along dependencies in the direction a change cascades; reduced motion and the Motion switch stop all of it ^f22fa6
+- [decision] Since 2026-09-28 the main view is a sky drawn on a canvas: each area a sunflower cluster with fixed homes, so nothing ever expands or overlaps; choosing a note flies the camera to it and brings its relations out to stand left (relied on) and right (relying); a grid of cards is the plain alternative ^f22fa6
+- [fact] web/index.html is a single file built by Vite from web/app and committed; npm run check-build fails if it drifts, and the build pins its two inline scripts by sha256 in the vercel.json CSP ^b72daf
 
 ## Relations
 - depends_on [[Memory Guard]]

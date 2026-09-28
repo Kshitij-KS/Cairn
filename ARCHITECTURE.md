@@ -537,8 +537,12 @@ tests the dispatcher's implementation for the platform by default; `--impl all` 
 
 ### 4.5 Memory Atlas
 
-`scripts/build_atlas.py` builds `web/data/graph.json` (schema 4: schema 3 plus a `playbooks` array with derived trust and counts only); `web/` renders it (vanilla JS +
-d3, layout precomputed in Python, no layout in the browser).
+`scripts/build_atlas.py` builds `web/data/graph.json` (schema 4: schema 3 plus a `playbooks` array with derived trust and counts only); `web/` renders it. The page is a
+React app in `web/app/` built by Vite into ONE committed file, `web/index.html` (every script and
+style inlined; `npm run check-build` fails if it drifts from its source), whose two inline scripts
+are pinned by sha256 in the `vercel.json` CSP. Its main view draws the memory as a sky on a canvas:
+a deterministic sunflower layout per cluster computed in the browser from the notes, so nothing ever
+overlaps; a grid of cards is the plain alternative. `web/SPEC.md` has the design and its proofs.
 
 - **Public build** (default): restricted notes omitted, and so is **every trace of them**: links to
   them are dropped rather than reported as broken, their paths are removed from activity, and the
@@ -565,7 +569,8 @@ d3, layout precomputed in Python, no layout in the browser).
   withheld string becomes a marker and none may appear in the page's text or markup; a withheld
   NAME is a marker whatever its length, matched as a whole word, and the redacted fixture omits
   notes so that check has a denominator; negative tests render a long and a short marker on purpose
-  and both must be caught. Dependencies are pinned by `package-lock.json`.
+  and both must be caught. `web/test/browser.mjs` repeats the geometry checks in a real Chrome and
+  loads the page under the deployed CSP. Dependencies are pinned by `web/package-lock.json`.
 - **Publication is manual** during containment (`atlas.yml` is `workflow_dispatch` only), and runs
   the redaction tests and the page tests before generating.
 
@@ -796,7 +801,7 @@ Each with where it is enforced and the test that shows it failing when broken.
 | Suite | Count | Covers |
 |---|---|---|
 | `tools/test_guard.py` | 22 | claim ids and carry-forward, trailing references, features and write-back, levels for new folders, agent-marker default, project tier from repo root |
-| `tools/test_security.py` | 29 | the audit's access/attribution BLOCKERs as regressions: policy self-demotion, empty policy, the floor, renames, case and Unicode tricks (range mode too), forged and blank authors, derived bytes, public paths, CODEOWNERS (catch-all and level-aware), open-under-restricted; the actor override inside an agent runtime; injection phrasings, with a benign negative. Never imports the guard under test (a guard that exits 0 at import once ended a run green) |
+| `tools/test_security.py` | 53 | the audit's access/attribution BLOCKERs as regressions; a key prefix must start a token (a CSS name like `mask-image-linear-to-color` is not a key): policy self-demotion, empty policy, the floor, renames, case and Unicode tricks (range mode too), forged and blank authors, derived bytes, public paths, CODEOWNERS (catch-all and level-aware), open-under-restricted; the actor override inside an agent runtime; injection phrasings, with a benign negative. Never imports the guard under test (a guard that exits 0 at import once ended a run green) |
 | `tools/test_gate.py` | 6 | the memory-gate job in its two-checkout shape: the 10-F1 attack PR, a quiet policy demotion, a demoting rename, an honest L0 note |
 | `tools/test_mem.py` | 106 | resolution and modes (including CI and AI-quality symptoms, asking instead of guessing, `mem asks`, team `extra_symptoms`), directional scope, ledger, cache, privilege, hooks, moved and refs, **area-04 concurrency and damage** (parallel loads, bundle isolation, UTF-8 past refs, cache tamper, session-id collisions and injection, per-session throttle, failed-save retry, corrupt ledgers, purge), write verbs, trials, evals |
 | `tools/test_parsers.py` | 6 | fenced/inline code ignored by claim and relation parsers |
@@ -978,7 +983,7 @@ Things worth trying to break, each with the expected result:
 | `decisions/ADR-001..004` | 28-127 | decision records |
 | `templates/project-memory/**` | 26 files | project tier seed |
 | `tools/test_*.py` (13 suites), `tools/testpolicy.py`, `tools/run_tests.sh`, `tools/gen_fixture.py` | 4,443 total | tests; `testpolicy.py` supplies the fictional owner (`alex`) the suites run as |
-| `web/` | app 1,767, style 654, index 211 | the atlas page; `web/test/` UI suite |
+| `web/` | app source 3,058 (`web/app/src`), tests 917; `index.html` is built | the atlas page; `web/test/` UI suite |
 
 
 ## Relations

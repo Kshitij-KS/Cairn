@@ -24,8 +24,12 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
-      - name: Install front-end test deps (jsdom, d3) locally in web/test
-        run: cd web/test && npm ci --no-audit --no-fund
+      - name: Install the page's build and test deps, pinned by web/package-lock.json
+        run: cd web && npm ci --no-audit --no-fund
+      # GitHub's Ubuntu runners ship Google Chrome; browser.mjs uses it for the layout, text-width
+      # and CSP checks jsdom cannot make. It would print SKIP, and run_tests.sh would show it, if not.
+      - name: Point the browser checks at the runner's Chrome
+        run: echo "CHROME_PATH=$(command -v google-chrome || command -v google-chrome-stable)" >> "$GITHUB_ENV"
       - name: Run every offline check
         run: |
           git config --global user.email "ci@example.invalid"

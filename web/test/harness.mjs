@@ -1,120 +1,166 @@
-/* Boot the real page in jsdom against a chosen graph.json, and hand back the window so a test
- * can poke it. jsdom has no layout engine and no SVG geometry, so the few APIs the app touches
- * are stubbed HERE and nowhere else, and each stub is a documented lie we then account for. */
+/* Boot the BUILT page (web/index.html, exactly what ships) in jsdom against a chosen graph.json,
+ * and hand back the window so a test can drive it. jsdom has no layout engine and does not run
+ * module scripts, so the few gaps are filled HERE and nowhere else, each one a documented lie:
+ *
+ *  1. The app script is a <script type="module">, which jsdom skips. It is lifted out of the page
+ *     and run as a classic script at the end of <body>, inside a function so its top-level names
+ *     stay private, in strict mode as a module would be. A module runs after parsing, and so
+ *     does this.
+ *  2. ResizeObserver, matchMedia, scrollIntoView and the clipboard do not exist in jsdom.
+ *  3. fetch serves the chosen graph file (or fails, when a test asks it to).
+ *  4. Every box measures 0x0, so page geometry (card overlap) is NOT checked here: that is what
+ *     test/browser.mjs does, in a real browser.
+ *  5. There is no canvas. getContext("2d") returns a recorder that draws nothing and measures
+ *     text at 6.5px a character. The sky's own geometry (where each star and each name goes) is
+ *     plain arithmetic, so it IS checked here, through window.__atlasSky.snapshot().
+ */
 import { JSDOM, VirtualConsole } from "jsdom";
 import fs from "node:fs";
 import path from "node:path";
-
 import { fileURLToPath } from "node:url";
+
 const WEB = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const W = 1120, H = 760;
+
+export function builtPage() {
+  const html = fs.readFileSync(path.join(WEB, "index.html"), "utf8");
+  const m = html.match(/<script type="module">([\s\S]*?)<\/script>/);
+  if (!m) throw new Error("web/index.html has no inline module script: is it a fresh build?");
+  return { html: html.replace(m[0], ""), app: m[1] };
+}
 
 export async function boot(graphPath, opts = {}) {
-  const html = fs.readFileSync(path.join(WEB, "index.html"), "utf8");
-  const css = fs.readFileSync(path.join(WEB, "style.css"), "utf8");
-  const app = fs.readFileSync(path.join(WEB, "app.js"), "utf8");
-  const d3src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "node_modules/d3/dist/d3.min.js"), "utf8");
-  const graph = fs.readFileSync(graphPath, "utf8");
-
+  const { html, app } = builtPage();
+  const graph = graphPath ? fs.readFileSync(graphPath, "utf8") : null;
   const vc = new VirtualConsole();
   const errors = [];
-  vc.on("jsdomError", (e) => errors.push(String(e.message || e)));
+  vc.on("jsdomError", (e) => { const t = String(e.message || e); if (!/Could not parse CSS stylesheet/.test(t)) errors.push(t); });
   vc.on("error", (...a) => errors.push(a.map(String).join(" ")));
 
-  const dom = new JSDOM(html.replace(/<script src="https:[^"]*"><\/script>/, ""), {
-    runScripts: "dangerously", pretendToBeVisual: true, url: "https://atlas.test/" + (opts.hash || ""),
-    virtualConsole: vc,
+  const dom = new JSDOM(html, {
+    runScripts: "dangerously", pretendToBeVisual: true,
+    url: "https://atlas.test/" + (opts.search || "") + (opts.hash || ""), virtualConsole: vc,
   });
   const win = dom.window, doc = win.document;
   win.__errors = errors;
+  if (opts.lastVisit) win.localStorage.setItem("atlas-last-visit", opts.lastVisit);
 
-  // --- stubs, each one a lie we are choosing on purpose -------------------
-  // 1. no layout engine: every box is the pane, which is what the app asks for
-  win.Element.prototype.getBoundingClientRect = function () {
-    const id = this.id || "";
-    if (id === "atlas" || this.classList?.contains("atlas"))
-      return { x: 0, y: 0, left: 0, top: 0, width: W, height: H, right: W, bottom: H };
-    return { x: 0, y: 0, left: 0, top: 0, width: 300, height: 170, right: 300, bottom: 170 };
-  };
-  Object.defineProperty(win.HTMLElement.prototype, "offsetWidth", { get() { return 300; }, configurable: true });
-  Object.defineProperty(win.HTMLElement.prototype, "offsetHeight", { get() { return 170; }, configurable: true });
-
-  // 2. no SVG geometry: path length and point-at-length are straight-line approximations,
-  //    enough for the draw-on animation and the pulse to run without throwing
-  win.SVGElement.prototype.getTotalLength = function () {
-    const d = this.getAttribute("d") || "";
-    const nums = d.match(/-?\d+(\.\d+)?/g) || [];
-    if (nums.length < 4) return 0;
-    const [x1, y1] = [+nums[0], +nums[1]], [x2, y2] = [+nums[nums.length - 2], +nums[nums.length - 1]];
-    return Math.hypot(x2 - x1, y2 - y1) || 1;
-  };
-  win.SVGElement.prototype.getPointAtLength = function (l) {
-    const d = this.getAttribute("d") || "";
-    const nums = (d.match(/-?\d+(\.\d+)?/g) || []).map(Number);
-    if (nums.length < 4) return { x: 0, y: 0 };
-    const total = this.getTotalLength() || 1, t = Math.max(0, Math.min(1, l / total));
-    return { x: nums[0] + (nums[nums.length - 2] - nums[0]) * t,
-             y: nums[1] + (nums[nums.length - 1] - nums[1]) * t };
-  };
-  // 2b. d3-zoom asks an <svg> for its width.baseVal.value to find its extent; jsdom has no
-  //     SVG geometry properties at all, so without this every zoom call throws. Browser-only gap.
-  for (const dim of ["width", "height"]) {
-    Object.defineProperty(win.SVGSVGElement.prototype, dim, {
-      configurable: true,
-      get() { return { baseVal: { value: dim === "width" ? W : H } }; },
-    });
-  }
-
-  win.SVGElement.prototype.getScreenCTM = function () {
-    return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0, inverse: () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }) };
-  };
-  if (!win.SVGElement.prototype.createSVGPoint) {
-    win.SVGSVGElement.prototype.createSVGPoint = function () {
-      return { x: 0, y: 0, matrixTransform() { return { x: this.x, y: this.y }; } };
-    };
-  }
-
-  // 3. CSS custom properties: jsdom does not cascade, so serve the token block directly
-  const tokens = {};
-  const root = css.slice(css.indexOf(":root {"), css.indexOf("}", css.indexOf(":root {")));
-  root.replace(/(--[\w-]+):\s*([^;]+);/g, (_, k, v) => { tokens[k] = v.trim(); return ""; });
-  const realCS = win.getComputedStyle.bind(win);
-  win.getComputedStyle = (el, pe) => {
-    const s = realCS(el, pe);
-    return new Proxy(s, {
-      get(t, p) {
-        if (p === "getPropertyValue") return (name) => tokens[name] || t.getPropertyValue(name) || "";
-        const v = t[p];
-        return typeof v === "function" ? v.bind(t) : v;
-      },
-    });
-  };
-
+  win.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
+  win.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} takeRecords() { return []; } };
   win.matchMedia = (q) => ({
-    matches: q.includes("reduced-motion") ? !!opts.reducedMotion
-      : q.includes("prefers-color-scheme: light") ? !!opts.light : false,
-    media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
+    matches: q.includes("reduced-motion") ? !!opts.reducedMotion : q.includes("prefers-color-scheme: dark") ? !!opts.dark : false,
+    media: q, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent() { return false; },
   });
-  win.fetch = async () => ({ ok: true, status: 200, json: async () => JSON.parse(graph) });
-  win.requestAnimationFrame = (cb) => win.setTimeout(() => cb(win.performance.now()), 16);
-  win.cancelAnimationFrame = (id) => win.clearTimeout(id);
-  if (!win.HTMLDialogElement.prototype.showModal)
-    win.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  win.Element.prototype.scrollIntoView = function () {};
+  const calls = { fillText: 0 };
+  win.__canvasCalls = calls;
+  win.HTMLCanvasElement.prototype.getContext = function () {
+    const store = { canvas: this };
+    return new Proxy(store, {
+      get(t, p) {
+        if (p in t) return t[p];
+        if (p === "measureText") return (txt) => ({ width: String(txt).length * 6.5 });
+        if (p === "createRadialGradient" || p === "createLinearGradient") return () => ({ addColorStop() {} });
+        if (p === "fillText") return () => { calls.fillText++; };
+        return () => {};
+      },
+      set(t, p, v) { t[p] = v; return true; },
+    });
+  };
+  win.HTMLElement.prototype.hasPointerCapture = () => false;
+  win.HTMLElement.prototype.releasePointerCapture = () => {};
+  const copied = [];
+  Object.defineProperty(win.navigator, "clipboard", { value: { writeText: async (t) => { copied.push(t); } }, configurable: true });
+  win.__copied = copied;
+  const fetched = [];
+  win.fetch = async (url) => {
+    fetched.push(String(url));
+    if (opts.fetchFails) return { ok: false, status: 404, json: async () => ({}) };
+    return { ok: true, status: 200, json: async () => JSON.parse(opts.graphText ?? graph) };
+  };
+  win.__fetched = fetched;
 
-  // d3 transitions throw asynchronously under jsdom when they touch geometry we only approximate;
-  // swallow those so a real assertion failure is not masked by transition noise
-  win.addEventListener("error", (e) => { e.preventDefault?.(); });
-  process.removeAllListeners("uncaughtException");
-  process.on("uncaughtException", (e) => { errors.push("uncaught: " + e.message + "\n" + String(e.stack||"").split("\n").slice(1,10).join("\n")); });
-
-  const s1 = doc.createElement("script"); s1.textContent = d3src; doc.body.appendChild(s1);
-  const s2 = doc.createElement("script"); s2.textContent = app; doc.body.appendChild(s2);
-
-  await new Promise((r) => setTimeout(r, opts.settle || 900));
+  win.addEventListener("error", (e) => { errors.push("window error: " + (e.message || e.error)); });
+  const s = doc.createElement("script");
+  s.textContent = '(function(){"use strict";\n' + app + "\n})();";
+  doc.body.appendChild(s);
+  await settle(win, opts.settle || 400);
   return { win, doc, dom, errors };
 }
 
-export const W_ = W, H_ = H;
+// jsdom tears a window down while a queued task of its own still reads window.location; that
+// throws from jsdom's internals after the test is over. Only that exact teardown error is
+// swallowed; any other uncaught error still fails the run.
+process.on("uncaughtException", (e) => {
+  if (/reading '_location'/.test(String(e && e.message)) && /jsdom[\\/]lib[\\/]jsdom[\\/]browser[\\/]Window\.js/.test(String(e.stack))) return;
+  console.error(e); process.exit(2);
+});
+
+export const settle = (win, ms = 120) => new Promise((r) => win.setTimeout(r, ms));
+
+/** React listens at the root for real event types; a bare .click() is fine, but keys and
+ *  double-clicks need the full event. */
+export function key(win, target, k, mods = {}) {
+  target.dispatchEvent(new win.KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...mods }));
+}
+export function dblclick(win, el) {
+  el.dispatchEvent(new win.MouseEvent("dblclick", { bubbles: true, cancelable: true, detail: 2 }));
+}
+/** Type into a React-controlled input: set the value through the native setter, then fire input. */
+export function typeInto(win, input, text) {
+  const set = Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, "value").set;
+  set.call(input, text);
+  input.dispatchEvent(new win.Event("input", { bubbles: true }));
+}
+
+/* ----------------------------- page readers -----------------------------
+ * The assertions compare what the PAGE shows with what the GRAPH says, computed here from the
+ * raw edges, never through the app's own model: a checker that reuses the code under test
+ * agrees with it by construction. */
+
+export function expectedLineage(graph, id) {
+  const ids = new Set(graph.nodes.map((n) => n.id));
+  const on = new Set(), by = new Set(), rel = new Set();
+  for (const e of graph.edges) {
+    if (!ids.has(e.source) || !ids.has(e.target)) continue;
+    if (e.dependency) {
+      if (e.source === id && e.target !== id) on.add(e.target);
+      if (e.target === id && e.source !== id) by.add(e.source);
+    }
+  }
+  for (const e of graph.edges) {
+    if (!ids.has(e.source) || !ids.has(e.target) || e.dependency) continue;
+    const other = e.source === id ? e.target : e.target === id ? e.source : null;
+    if (other && other !== id && !on.has(other) && !by.has(other)) rel.add(other);
+  }
+  return { reliesOn: on, reliedOnBy: by, related: rel };
+}
+
+export function shownLineage(doc) {
+  const col = (side) => new Set([...doc.querySelectorAll(`[data-lineage="${side}"][data-present]`)].map((b) => b.getAttribute("data-note")));
+  return { reliesOn: col("left"), reliedOnBy: col("right"), related: col("below") };
+}
+
+export const sameSet = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
+
+/** Every note is on the map exactly once, or counted in its group's "+N more": the partition
+ *  the whole design rests on. Returns the problems found; an empty list is a pass. */
+export function partitionProblems(doc, graph, hidden = new Set()) {
+  const problems = [];
+  const visible = graph.nodes.filter((n) => !hidden.has(n.level));
+  const chips = [...doc.querySelectorAll('[data-view="map"] [data-note]')].map((c) => c.getAttribute("data-note"));
+  const seen = new Set();
+  for (const c of chips) { if (seen.has(c)) problems.push("drawn twice: " + c); seen.add(c); }
+  let folded = 0;
+  for (const b of doc.querySelectorAll("[data-more]")) {
+    const n = +((b.textContent || "").match(/\+(\d+) more/) || [])[1];
+    if (!Number.isFinite(n)) problems.push("unreadable more pill: " + b.textContent);
+    else folded += n;
+  }
+  if (seen.size + folded !== visible.length) problems.push(`shown ${seen.size} + folded ${folded} != ${visible.length} visible notes`);
+  const ids = new Set(visible.map((n) => n.id));
+  for (const c of seen) if (!ids.has(c)) problems.push("not a visible note: " + c);
+  return problems;
+}
 
 /* Privacy oracle (audit 07-F5). The old checks skipped every node whose body was withheld - the
  * exact case they were meant to cover - and two of them inspected the input JSON, not the page.

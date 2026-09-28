@@ -25,10 +25,14 @@ loop is alive, which page views would not.
 
 ## What it shows
 
-- **The map.** Every public note, grouped by area or by time (two arrangements; the page morphs
-  between them). Colour is the level, size is the number of facts, fading is age. Selecting a note
-  shows its detail and highlights what depends on it: exactly what `memory_guard.py cascade` would
-  stamp if it changed.
+- **The sky** (the main view). Every public note is a star, grouped into a cluster per area or per
+  month (two arrangements; the stars fly between them). Colour is the level (or, on request, how
+  recently it changed), size is the number of facts. Selecting a star is a focus: the camera flies
+  to it and its relations step out of their clusters to stand around it, what it relies on to the
+  left, what relies on it to the right, see-also below. That left/right split is exactly what
+  `memory_guard.py cascade` would stamp if it changed.
+- **The grid** (the plain alternative). The same notes as cards of labelled chips, one card per
+  area or month, and a column lineage view for one note.
 - **Briefing line.** The conclusion in words: "Three proposals are waiting, the oldest for six days.
   Two notes need re-reading."
 - **Since you last looked.** The last visit time is kept in this browser (localStorage) and used to
@@ -38,7 +42,8 @@ loop is alive, which page views would not.
   item links to the file.
 - **Pulse.** Recent activity: level, whether a person or an agent wrote it, how many files, and
   which published notes it touched. Code paths and commit messages are never published.
-- Notes are addressable: the selected note is in the URL.
+- Views are addressable: the mode, the arrangement and the selected note are in the URL
+  (`#area~<id>` in the sky, `#grid:area~<id>!focus` in the grid).
 
 Out of scope: editing anything from the page (the write path is the guard; routing writes around
 it would defeat the governance layer), authentication, natural-language query.
@@ -47,9 +52,14 @@ it would defeat the governance layer), authentication, natural-language query.
 
 `scripts/build_atlas.py` (standard library only) parses the notes with the guard's own parsers, so
 the page can never disagree with the enforcement engine; walks `git log` for activity (capped at
-200 entries); computes the layout; and writes one `web/data/graph.json` (schema 4). The page is
-`index.html` + `app.js` + `style.css`, with d3 v7 from a CDN. No build step; host it anywhere
-(`vercel.json` is included).
+200 entries); and writes one `web/data/graph.json` (schema 4). The page reads only that file.
+
+The page itself is a small React app in `web/app/` (Radix primitives in the shadcn style, Motion,
+cmdk, d3 modules for the camera and packing), built by Vite into **one self-contained file**,
+`web/index.html`, with every script and style inlined. That file is committed, so the site still
+hosts anywhere with no build step and no server; `npm run check-build` fails if it is not exactly
+what the source builds to today. The build also writes the sha256 of each inline script into the
+Content-Security-Policy in `vercel.json`, so the deployed page runs those two scripts and nothing else.
 
 Publication is manual (Actions -> atlas), and the workflow runs the redaction tests first.
 
@@ -77,72 +87,48 @@ notes (by default) and fails on any difference, any unknown key or wrongly typed
 duplicate key, publication settings the policy does not grant, and any trace of a restricted note or
 a withheld title. `--full` produces the unredacted build for local use; it is never deployed.
 
-## Level of detail
+## Nothing overlaps, by construction
 
-About 60 freely placed 11px labels fit a typical pane, and a note's label anchored under its own
-mark fits far fewer. That is a fact about type, not about rendering technology, so canvas or WebGL
-would not move it. The map therefore shows **one depth at a time**, capped at every level:
+The old map nested groups inside discs and opened them in place, and notes collided whenever a
+group grew. The sky removes the cause instead of tuning around it:
 
-- at most **9 groups** and at most **32 notes** per view (`GROUP_CAP`, `CAP` in `build_atlas.py`);
-- growth adds depth, not density: oversized groups split by real keys (folder, month, week, day),
-  and a level holding exactly one thing is spliced out;
-- the time stream rolls months up into years once there are more than ten.
+- **Nothing expands.** Every note has one fixed home. A cluster is a sunflower (Vogel's
+  phyllotaxis): note *i* sits at radius `12.5 * sqrt(i + 0.5)` on the golden angle, most connected
+  first, so it is at the heart. That spiral packs points evenly; the nearest two notes are about 19
+  world units apart at any size (measured: 19.3 over 3,100 points), against a largest dot of 6.5,
+  so no two dots can touch. Clusters are circle-packed with room for their names.
+- **Names are placed, never piled.** Every frame, names go down greedily, most important first,
+  and a name goes only where it touches no other name and covers no other star. At a distance you
+  read the areas; zoom in and note names appear where there is room.
+- **A focus has its own geometry.** Around a chosen note, its relations stand in two bracket-shaped
+  arcs and a list, spaced in screen pixels (so the room for each name is the same at every zoom),
+  capped at 14 a side (8 see-also) with the rest counted and listed in the side panel. On a narrow
+  screen the three become one list under the note.
+- **Deterministic.** The layout is a pure function of the notes, so "that cluster on the left" means
+  the same thing to every teammate, and a link lands on the same spot.
 
-Consequences, taken deliberately:
+## Look and motion
 
-- **Layout is computed in the builder and frozen into the data.** No simulation in the browser, no
-  load freeze, and the map is identical for everyone, so "that cluster on the left" means the same
-  thing to every teammate.
-- **Every group disc contains its members,** so going deeper is a camera move into a real place.
-- **The camera moves; the layout never does.**
-- **SVG stays,** because the view never draws more than a few hundred elements.
-- **Text never scales with the camera.** Everything meant to be read lives in a counter-scaled
-  group; every label measures 11px or 14px on screen at any zoom.
+Linear/Vercel-quiet chrome (neutral zinc, Geist and Geist Mono, hairline shadows instead of
+borders) around a sky that is the brightest thing on the page. Dark by default when the system is,
+with a light theme. Level colours are the one strong colour.
 
-## Look
+Motion follows Emil Kowalski's rules for interface animation, and cinema for the sky:
 
-An observatory instrument: the memory is a sky you fly into, and the chrome around it is glass and
-hairline, so the map is always the brightest thing on the page. Dark (night) by default when the
-system is dark, with a light (day) theme; the toggle wipes between them in a circle from the button.
-
-- **Light is information.** A note is a lit mark in its level's colour with a soft bloom and a small
-  highlight; a region is a disc lit from its centre, its contents drawn inside it as tissue, its level
-  mix as a gauge on the rim. The ground is a quiet gradient over a faint dot grid (an instrument's
-  graticule, not a starfield).
-- **One signal colour** (orchid) means "this is what you are looking at": the selection, its
-  reticle, the edges it touches (drawn marching), the ripple a click leaves.
-- **Glass** for everything that floats over the map (controls, key, card, hover card, search), with
-  a hairline edge that catches light.
-- **Type.** Instrument Serif for names and headings, Instrument Sans for the interface, IBM Plex
-  Mono for ids, counts and paths. Every label measures 11px (notes) or 14px (regions) on screen.
-
-Motion is physical and always optional. Springs for what you touch (a mark swells under the
-pointer, segmented controls move a thumb, the card and dialogs spring in); a long ease for the
-camera; each level arrives in a staggered wave; the briefing arrives a word at a time; numbers count
-up. One continuous motion is an argument rather than decoration: light runs along every dependency
-from the note relied on to the notes that rely on it, the direction a planning change cascades.
-`prefers-reduced-motion` stops all of it, and the Motion switch does the same on request; the page
-is complete at rest.
-
-| Level | Meaning | Night | Day |
-|---|---|---|---|
-| L0 | observation | `#6EA8FF` | `#2F6FEB` |
-| L1 | project planning | `#3DDC97` | `#0E9F6E` |
-| L2 | strategy | `#FFB547` | `#C27400` |
-| L3 | governance | `#FF7A6E` | `#D9463B` |
-
-| Role | Night | Day |
-|---|---|---|
-| ground | `#070A12` | `#F4F3EF` |
-| raised surface | `#121A2A` | `#FFFFFF` |
-| primary text | `#EEF1FA` | `#11131F` |
-| secondary text | `#B4BCD3` | `#3D4257` |
-| rule | `#232B40` | `#DCDCE4` |
-| signal | `#D59CFF` | `#8E3BD6` |
-| needs attention | `#F6C453` | `#B7791F` |
-
-Search is also a command bar: `/` or Ctrl/Cmd+K focuses it, arrow keys move through the results,
-Enter opens one, and the matched text is marked.
+- Interface motion is fast and eased out (`cubic-bezier(0.23, 1, 0.32, 1)`), under 300ms, exits
+  faster than entrances; pressing anything scales it to 0.97; popovers grow from their trigger; the
+  command palette opens with no animation at all, because it is used from the keyboard.
+- The camera moves with a smooth zoom (van Wijk and Nuij), so long journeys pull out a little and
+  come back in, and any flight can be interrupted by grabbing the sky.
+- A focus is choreographed: the camera flies in while the neighbours fly out of their clusters to
+  their places, the rest of the sky steps back behind a veil, the relation curves draw on, and names
+  fade in only once the notes have nearly arrived, so text never rides on a moving dot. Light runs
+  along each dependency the way a change travels. Escape plays it backwards.
+- The first load pulls back from close in to take in the whole sky; switching arrangement flies
+  every star to its new home, left to right, and the new cluster names wait until the stars arrive.
+- Ambient life (a slow twinkle, a breathing ring on notes changed this week) runs only while the
+  page is visible. `prefers-reduced-motion` turns every move into a cut and stops the ambient
+  motion; the page is complete at rest.
 
 ## States and accessibility
 
@@ -152,39 +138,44 @@ screen); data older than 48 hours (the build stamp turns amber); fetch failure (
 that fixes it); an out-of-date data schema (explains itself instead of drawing nothing); arriving by
 deep link; nothing waiting (says so plainly).
 
-Every note is reachable by keyboard and activates on Enter or Space; tabs move with arrow keys;
-dialogs trap and return focus; live regions announce the briefing; focus shows on the mark, not on
-a group's bounding box.
+Every note is reachable by keyboard: `/` or Ctrl/Cmd+K opens the palette, which finds any note and
+runs any action; the grid is a page of real buttons (Enter or Space), and `G` switches to it. The
+sky's canvas carries a label saying so. Tabs move with arrow keys, dialogs trap and return focus,
+and the briefing is a live region.
 
 ## Tests (`web/test`)
 
-`npm test` runs the page in jsdom against the template's own notes and three synthetic corpora
-(about 120, 1,020 and 3,020 notes, from `tools/gen_fixture.py`):
+`npm test` runs the BUILT page (`web/index.html`, exactly what ships) in jsdom against the
+template's own notes, a redacted corpus, a full local build, and synthetic corpora of about 120,
+1,020 and 3,020 notes (`tools/gen_fixture.py`). Expected values come from the graph's raw edges,
+never from the app's own code.
 
-- the caps hold **at every level**, in both arrangements, at every size, with no collisions among
-  the labels actually drawn;
-- every label measures 11px or 14px on screen whatever the camera scale;
-- a privacy oracle scans the rendered page (`document.body.textContent` and markup) for every
-  string the public build withheld;
-- reduced motion renders and navigates;
-- `negative.mjs` proves the checks can fail: an overfilled cluster is still capped, the label
-  thinning pass really parks labels, and a deliberately leaked string is caught.
-
-What the suite also guards against, from defects found while building it:
-
-- every check asserts that it reached at least one note or marker, so an empty view cannot pass;
-- the caps are asserted at every level of the tree, not only the top;
-- elements caught mid-exit are revived when a new view reuses them;
-- a note's visibility never depends on a transition finishing;
-- label collisions are measured in screen coordinates, not world coordinates;
-- `npm run shots` renders each depth to SVG, because jsdom cannot see what a person sees.
+- `sky.mjs`: every note is a star; no two stars closer than two of the largest dots; no name
+  touches another or covers a star, at a distance, zoomed in, in focus and by time; every large area
+  is named; clicking a star gives exactly its lineage (left, right, below), brings it to the centre
+  and names every neighbour; neighbours re-centre, Escape walks back; hiding a level removes its
+  stars; with reduced motion a focus arrives at once.
+- `suite.mjs` (the grid): every note is shown once or counted in its group's "+N more", before and
+  after opening a group; selecting fades exactly the unrelated notes and opens no box over the map;
+  the column lineage is exact; the palette, arrangement, level filter, rail counts, deep links, the
+  `?data=` whitelist, and the failure states.
+- Both: a privacy oracle scans the rendered page (text and markup, every tab) for every string the
+  public build withheld.
+- `negative.mjs` proves the checks fail when they should: a chip drawn twice or missing, a
+  dependent in the wrong column, two names on top of each other, a name over a star, two stars
+  crowding, and leaked strings (long and short).
+- `browser.mjs` (`npm run test:browser`, needs Chrome; CI runs it) makes the checks jsdom cannot:
+  real layout (with every group opened, no two chips or cards overlap and every chip is inside its
+  card, at 1440px and 390px), real text widths for the sky's names, a real click choosing the star
+  under the pointer, and the deployed Content-Security-Policy (the page runs under it with no
+  violation).
 
 ## Not verified
 
-jsdom has no layout engine and no SVG geometry, so `getBoundingClientRect`, path lengths and CTMs
-are stubbed, and label widths come from a per-character estimate rather than real text metrics.
-Frame rate, the feel of the camera, font loading, blend modes, touch targets and pinch-zoom have
-not been measured by the suite. Look at the page in a real browser after any visual change.
+The feel of the motion (timing, easing, frame rate on a slow machine) was checked by eye from
+frame sequences in a headless browser, not measured. Touch gestures (pinch, pan) were not tested on
+a real device. Web fonts were not loadable where the screenshots were taken, so the checks ran with
+the fallback font; the name-placement check runs on real widths either way.
 
 ## Open questions
 

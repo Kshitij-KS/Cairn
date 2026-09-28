@@ -1,42 +1,42 @@
 # Front-end checks
 
 ```bash
-cd web/test && npm install
-npm test          # 110 assertions across four corpus sizes, plus 9 negative tests
-npm run shots     # render each depth to SVG, then rasterise and LOOK at them
+cd web && npm ci
+npm test                # sky.mjs + suite.mjs + negative.mjs, in jsdom, against the BUILT page
+npm run test:browser    # browser.mjs, in a real Chrome (CHROME_PATH, or the usual install paths)
+npm run check-build     # web/index.html and vercel.json are exactly what web/app builds to today
 ```
 
-`suite.mjs` runs against four fixtures — the template's own notes plus synthetic corpora at 120, 1,020 and
-3,020 notes. Generate the synthetic ones with `tools/gen_fixture.py` (see below); the paths are at
-the bottom of `suite.mjs`.
+Everything runs against `web/index.html`, the file that ships, not the sources. The fixtures are
+the template's own notes (`graph.json`, with `graph.full.json` as its unredacted build for the
+privacy oracle), a redacted corpus (`redacted.json` / `redacted.full.json`), and synthetic corpora
+of about 120, 1,020 and 3,020 notes.
 
 ## What these protect
 
-1. **The caps.** At every depth, in both arrangements, at all four sizes: at most 9 groups and 32
-   notes, zero collisions among the labels actually drawn.
-2. **Type is camera-independent.** Every label measures exactly 11px or 14px *on screen* whatever
-   the camera scale. This is the most valuable check here: SVG scales text with its ancestors, and
-   before this assertion existed the whole suite was green while every label rendered at three
-   times its intended size.
-3. **Redaction.** No withheld body, no summary line above `publication.brief_levels`, and no commit
-   message reaches the DOM. It scans `document.body.textContent`, not the data.
-4. **Reduced motion** renders and navigates.
-5. **The gates can fail.** `negative.mjs` feeds a cluster claiming 200 members and asserts the
-   client still draws at most 32; it also asserts the label-thinning pass parks *some* labels at
-   density, because a legibility check that runs on a view with no labels passes while asserting
-   nothing.
+1. **Nothing overlaps.** In the sky: no two stars closer than two of the largest dots, and no name
+   touching another name or covering another star, at a distance, zoomed in, in focus and by time
+   (jsdom, from the engine's own geometry; `browser.mjs` repeats it with real text widths). In the
+   grid: every chip and card measured in a real browser, with every group opened, at 1440px and 390px.
+2. **The lineage is exact.** What stands left of a chosen note is exactly what it relies on, right
+   is exactly what relies on it, below is exactly what it relates to, computed from the raw edges
+   by the test, never through the app's own model.
+3. **The partition.** In the grid, every note is shown once or counted in its group's "+N more".
+4. **Redaction.** No withheld body, no summary line above `publication.brief_levels`, no withheld
+   title and no commit message reaches the page, text or markup, in any tab.
+5. **The deployed CSP.** The page runs under the exact header `vercel.json` sends, with no violation.
+6. **The gates can fail.** `negative.mjs` breaks each invariant on purpose and asserts the check
+   goes red.
 
-## Two standing rules
+## Standing rules
 
-**Every check asserts that it reached something.** A label check on a view with no labels asserts nothing, so each one also checks it saw at least one.
+**Every check asserts that it reached something** (a label check on a view with no labels asserts
+nothing), and **an unrun check says so**: `browser.mjs` prints SKIP when there is no Chrome, and
+`tools/run_tests.sh` counts a missing `npm ci` as a failure.
 
-**Look at the screenshots.** `npm run shots` exists because
-this suite has been green while the screen was a mess. jsdom cannot see text metrics, blend modes
-or frame rate; it can only see what you told it to measure.
+**Look at it.** jsdom cannot see a picture. After a visual change, open the page in a browser.
 
 ## Fixtures
-
-`fixtures/graph.json` is the template's own notes (`fixtures/graph.full.json` is their unredacted build, the privacy oracle's source). The three synthetic ones were produced by
 
 ```bash
 python3 tools/gen_fixture.py 100  /tmp/n120    # ~120 notes

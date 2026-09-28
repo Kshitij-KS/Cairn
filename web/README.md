@@ -20,6 +20,17 @@ uv run -q --script scripts/build_atlas.py        # writes web/data/graph.json, r
 python -m http.server -d web 8080                # then open http://localhost:8080
 ```
 
+`web/index.html` is a built file, committed so the page needs no build to host. To change the page,
+edit `web/app/src/` and rebuild:
+
+```bash
+cd web && npm ci
+npm run dev            # live reload while you work
+npm run build          # writes web/index.html and pins its scripts in vercel.json
+npm test               # the page, driven in jsdom at four corpus sizes
+npm run test:browser   # layout, text widths and the CSP, in a real Chrome (set CHROME_PATH if needed)
+```
+
 Opening `index.html` straight from disk will not work, because browsers block `fetch` on
 `file://`. The page says so if you try.
 
@@ -57,7 +68,8 @@ and fails the run if a body or a commit message got through.
    Other and the build command empty. The site is static.
 3. Deploy. Vercel serves `index.html` and rebuilds on every push.
 
-`web/vercel.json` sets a content security policy limiting scripts to this origin and cdnjs,
+`web/vercel.json` sets a content security policy that allows exactly the page's two inline scripts
+(by sha256, written by `npm run build`) and nothing else,
 sends `X-Robots-Tag: noindex` so the page stays out of search results, and marks
 `data/graph.json` as always revalidate so a deploy is never served from a stale cache.
 
@@ -76,7 +88,7 @@ example Cloudflare Access) in front of the domain and publish the unredacted bui
 ## Observations
 - [rule] The published build is redacted by each note's `confidentiality` field; unmarked notes block the build
 - [rule] `web/data/graph.full.json` is unredacted and must never be committed or deployed
-- [fact] Vercel serves the `web` directory as a static site with no build step
+- [fact] Vercel serves the `web` directory as a static site with no build step; `web/index.html` is built from `web/app/` and committed
 - [fact] The atlas workflow (run by hand while automatic publication is paused) rebuilds the map and fails if a note body or commit message reaches the public file
 - [decision] The published build is redacted; an access proxy is the route to a private full-text version
 

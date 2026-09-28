@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Every offline check in this repo. No network, no key.
 #
-# A skipped suite is a FAILED run: the UI suite needs `npm ci` in web/test, and a run that quietly
+# A skipped suite is a FAILED run: the UI suite needs `npm ci` in web, and a run that quietly
 # skipped it once reported green (recheck 11-F2). CAIRN_SKIP_UI=1 skips it on purpose and says so.
 set -u
 cd "$(dirname "$0")/.."
@@ -36,12 +36,17 @@ for c in (".claude/skills/team-memory/SKILL.md", ".kiro/skills/team-memory/SKILL
     if open(c, "rb").read() != a: bad.append(c + " differs from the canonical skill")
 print("\n".join(bad) or "all parse; skill copies byte-identical"); sys.exit(1 if bad else 0)
 PY
-if [ -d web/test/node_modules ]; then
-  printf '\n=== UI\n'; (cd web/test && node suite.mjs | tail -1 && node negative.mjs | tail -1) || fail=1
+if [ -d web/node_modules ]; then
+  # The committed page must be what its source builds to, then the page is driven at every size.
+  printf '\n=== UI build is current\n'; (cd web && node app/check-build.mjs) || fail=1
+  for t in suite sky negative; do
+    printf '\n=== UI %s\n' "$t"; (cd web && node "test/$t.mjs" | tail -1; exit "${PIPESTATUS[0]}") || fail=1
+  done
+  printf '\n=== UI in a real browser\n'; (cd web && node test/browser.mjs | tail -1; exit "${PIPESTATUS[0]}") || fail=1
 elif [ "${CAIRN_SKIP_UI:-0}" = "1" ]; then
   printf '\n=== UI skipped on purpose (CAIRN_SKIP_UI=1)\n'
 else
-  printf '\n=== UI NOT RUN: cd web/test && npm ci   (or CAIRN_SKIP_UI=1 to skip on purpose) - counted as a failure\n'
+  printf '\n=== UI NOT RUN: cd web && npm ci   (or CAIRN_SKIP_UI=1 to skip on purpose) - counted as a failure\n'
   fail=1
 fi
 [ "$fail" = 0 ] && printf '\nall checks passed\n' || printf '\nSOME CHECKS FAILED\n'
