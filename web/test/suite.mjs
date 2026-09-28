@@ -252,8 +252,12 @@ console.log("\n=== arriving ===");
   f.win.close();
 
   const old = JSON.parse(fs.readFileSync(FIX("graph.json"), "utf8"));
-  old.schema = 3;
+  old.schema = 2; delete old.queue;
   const h = await boot(null, { graphText: JSON.stringify(old) });
+  const three = JSON.parse(fs.readFileSync(FIX("graph.json"), "utf8")); three.schema = 3; delete three.playbooks;
+  const t3 = await boot(null, { graphText: JSON.stringify(three) });
+  ok("a schema 3 file (every field the page reads, no playbooks) still opens", !!t3.doc.querySelector("[data-view=sky]") && t3.errors.length === 0, t3.errors.join());
+  t3.win.close();
   ok("an old data file says it is too old", (h.doc.querySelector("[data-problem]") || { textContent: "" }).textContent.includes("too old"));
   h.win.close();
 

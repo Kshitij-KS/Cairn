@@ -15,6 +15,14 @@ import { readHash, writeHash } from "@/lib/route";
 
 type Boot = { state: "loading" } | { state: "error"; why: string } | { state: "old"; schema?: number } | { state: "ready"; m: Model };
 
+/** The fields this page reads. A file without them is from an older (or a foreign) build, and
+ *  the page says so rather than drawing an empty sky. Schema 3 files have them all. */
+function readable(g: Graph | null): boolean {
+  return !!g && Array.isArray(g.nodes) && Array.isArray(g.edges) && Array.isArray(g.activity)
+    && !!g.levels && !!g.stats && !!g.queue && Array.isArray(g.queue.proposals) && Array.isArray(g.queue.review_needed)
+    && !!g.health && typeof g.health.score === "number";
+}
+
 function readLastVisit(): Date | null {
   try {
     const raw = localStorage.getItem("atlas-last-visit");
@@ -178,7 +186,7 @@ export function App() {
         if (!res.ok) throw new Error(`the server returned ${res.status}`);
         const g = (await res.json()) as Graph;
         if (!live) return;
-        if (!g || !Array.isArray(g.nodes) || !Array.isArray(g.edges) || !(g.schema >= 4)) { setBoot({ state: "old", schema: g && g.schema }); return; }
+        if (!readable(g)) { setBoot({ state: "old", schema: g && g.schema }); return; }
         setBoot({ state: "ready", m: buildModel(g) });
       } catch (err) {
         if (live) setBoot({ state: "error", why: err instanceof Error ? err.message : String(err) });
@@ -200,7 +208,7 @@ export function App() {
         )}
         {boot.state === "old" && (
           <Problem title="This data file is too old">
-            <p>It is {boot.schema ? <>schema {boot.schema}</> : "not a map this page can read"}; this page needs schema 4 or newer. Rebuild it:<br /><code>uv run -q --script scripts/build_atlas.py</code></p>
+            <p>It {boot.schema ? <>is schema {boot.schema}, and</> : null} lacks fields this page reads (the notes, links, activity, queue and health). Rebuild it:<br /><code>uv run -q --script scripts/build_atlas.py</code></p>
           </Problem>
         )}
         {boot.state === "ready" && <Atlas m={boot.m} />}
