@@ -27,6 +27,7 @@ Never force-pushes the default branch; a merge conflict stops the sync with exit
 - [fact] A left-behind memory/<who> branch whose content is merged into the base is reused; the person's branch is their roles.json handle ^ae2389
 - [fact] The dispatcher saves and restores the index around a pull, so autostash no longer unstages the person's files ^996bf9
 - [fact] The lock is judged by its owner process on this machine, not by age alone, and is stolen by rename ^b537b6
+- [fact] sync-memory resolves its own location and the repository root with realpath; a relpath between a short or symlinked path and git's long one made every tier commit look like it changed files outside the tier, and CI now runs every suite with TMPDIR behind a symlink ^f72a20
 
 ## Relations
 - depends_on [[Memory Guard]]

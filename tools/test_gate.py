@@ -16,6 +16,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+# A Windows console defaults to cp1252: one non-ASCII character in a check's detail crashed the
+# whole run with UnicodeEncodeError (Windows CI). Print it escaped instead.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(errors="backslashreplace")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import testpolicy  # noqa: E402
 

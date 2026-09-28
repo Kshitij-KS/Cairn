@@ -14,6 +14,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+# A Windows console defaults to cp1252: one non-ASCII character in a check's detail crashed the
+# whole run with UnicodeEncodeError (Windows CI). Print it escaped instead.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(errors="backslashreplace")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -515,7 +520,7 @@ def test_author_kept():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-EXPECTED = 53  # a run that silently stops early must not pass (expected-count check)
+EXPECTED = 57  # a run that silently stops early must not pass (expected-count check)
 
 
 def test_secret_prefix_boundary():
@@ -538,7 +543,69 @@ def test_secret_prefix_boundary():
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _alias(real, tmp):
+    """Another name for the same folder, the kind git never reports: a Windows 8.3 short name
+    (C:\\Users\\RUNNER~1, what the Windows CI runner's TEMP is), or a symlink elsewhere."""
+    if os.name == "nt":
+        import ctypes
+        buf = ctypes.create_unicode_buffer(1024)
+        if ctypes.windll.kernel32.GetShortPathNameW(real, buf, 1024) and buf.value.lower() != real.lower():
+            return buf.value
+        link = os.path.join(tmp, "alias")
+        subprocess.run(["cmd", "/c", "mklink", "/J", link, real], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return link if os.path.isdir(link) else None
+    link = os.path.join(tmp, "alias")
+    os.symlink(real, link)
+    return link
+
+
+def test_path_aliases():
+    print("\nWindows CI: a tier reached by another name for its folder (8.3 short name, symlink) works")
+    tmp = tempfile.mkdtemp()
+    try:
+        root, notes = make_repo(tmp, prefix="memory")
+        write(os.path.join(notes, "context", "x.md"), NOTE)
+        sh(root, "git", "add", "-A")
+        alias = _alias(root, tmp)
+        ok("an alias for the repository folder exists", bool(alias), str(alias))
+        if alias:
+            rc, out = guard(root, "--notes-root", os.path.join(alias, "memory"), "classify", "--staged")
+            ok("the guard classifies memory/context/x.md as L1 through the alias, as through the real path",
+               rc == 0 and out.strip().splitlines()[:1] == ["L1"], "rc=%d %s" % (rc, out[-200:]))
+            os.makedirs(os.path.join(notes, "scripts"), exist_ok=True)
+            shutil.copy(os.path.join(os.path.dirname(GUARD), "sync-memory.py"), os.path.join(notes, "scripts", "sync-memory.py"))
+            probe = ("import runpy,sys; g=runpy.run_path(sys.argv[1], run_name='probe'); print(g['tier_prefix']())")
+            rc, out = sh(root, sys.executable, "-c", probe, os.path.join(alias, "memory", "scripts", "sync-memory.py"))
+            ok("sync-memory's tier prefix through the alias is memory/ (not ../../alias/memory/)",
+               rc == 0 and out.strip().splitlines()[-1:] == ["memory/"], "rc=%d %s" % (rc, out[-200:]))
+        else:
+            ok("the guard classifies through the alias (not run: no alias could be made)", False)
+            ok("sync-memory's prefix through the alias (not run: no alias could be made)", False)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_console_encoding():
+    print("\nWindows console: output the console cannot encode is escaped, never a crash")
+    tmp, root, notes = fresh()
+    try:
+        write(os.path.join(notes, "log", "journal", "kanji.md"),
+              NOTE.replace("Export Notes", "Kanji \u6f22\u5b57 note").replace("How exporting works.", "Kanji \u2192 \u6f22\u5b57."))
+        sh(root, "git", "add", "-A")
+        sh(root, "git", "commit", "-qm", "kanji")
+        e = dict(os.environ, PYTHONIOENCODING="cp1252")   # what a Windows console gives a script
+        p = subprocess.run([sys.executable, os.path.join(os.path.dirname(GUARD), "mem.py"), "recall", "kanji"], cwd=notes, env=e,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        out = (p.stdout + p.stderr).decode("cp1252", "replace")
+        ok("negative: mem recall of a non-ASCII title on a cp1252 console prints it escaped, no UnicodeEncodeError",
+           "UnicodeEncodeError" not in out and "\\u6f22" in out, "rc=%d %s" % (p.returncode, out[-200:]))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
+    test_path_aliases()
+    test_console_encoding()
     test_secret_prefix_boundary()
     test_policy_self_demotion()
     test_empty_policy()

@@ -23,6 +23,7 @@ Never overwrites an existing file; files that already exist get a .team-memory.s
 - [gotcha] Before 2026-09-23 the scaffold did not copy memory_guard.py, so project tiers ran with policy unenforced ^205493
 - [decision] Since 2026-09-28 one Python implementation (new_project_memory.py) does the scaffolding; the .sh and .ps1 files only find Python and run it, because the two shell copies had drifted and the PowerShell one could not be tested on Linux ^3deb4e
 - [fact] A project tier's context/, decisions/ and CORE.md are L1 through paths.project_rules; in the company tier they are L2 ^070500
+- [fact] A tier scaffolded under a path with a symlink or 8.3 short name classifies and writes CODEOWNERS exactly as under its real path; test_scaffold catches it when TMPDIR sits behind a symlink ^eb6b32
 
 ## Relations
 - depends_on [[Memory Sync]]

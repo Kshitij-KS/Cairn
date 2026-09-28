@@ -31,7 +31,12 @@ jobs:
       - name: Point the browser checks at the runner's Chrome
         run: echo "CHROME_PATH=$(command -v google-chrome || command -v google-chrome-stable)" >> "$GITHUB_ENV"
       - name: Run every offline check
+        # TMPDIR reaches the temp folder through a symlink, so every suite also runs where the path
+        # a script sees is not the path git reports: the Linux form of the Windows runner's 8.3
+        # short TEMP (C:\Users\RUNNER~1), which once broke every project-tier and PR-mode path.
         run: |
+          mkdir -p "$RUNNER_TEMP/real-tmp" && ln -sfn "$RUNNER_TEMP/real-tmp" "$RUNNER_TEMP/alias-tmp"
+          export TMPDIR="$RUNNER_TEMP/alias-tmp"
           git config --global user.email "ci@example.invalid"
           git config --global user.name "ci"
           bash tools/run_tests.sh

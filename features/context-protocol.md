@@ -29,6 +29,7 @@ Context Protocol is the reader: `mem load` gives an agent the core, resolves whi
 - [fact] Past 40 features the bundle's feature map lists the ones near the ask and names the rest ^665a97
 - [fact] The rerun line is shell-inert: only words and plain punctuation of the ask survive in it ^934f06
 - [fact] Evals run without the runner's pins and mutes, and a trial fails eval --trial if it removes a passing eval or adds a failing one ^d7ddd7
+- [fact] Every script prints characters the console cannot encode as escapes (backslashreplace), so a non-ASCII note title never ends a Windows run in UnicodeEncodeError ^c96d8d
 
 ## Relations
 - depends_on [[Memory Guard]]

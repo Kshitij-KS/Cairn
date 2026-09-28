@@ -1883,7 +1883,7 @@ def expand_embedded_flags(argv):
 
 def shell_safe(text):
     """Text that is inert inside double quotes in bash, zsh, PowerShell and cmd. The rerun line is
-    copied and run; a `$HOME` or a backtick in the ask was EXPANDED, and `\`id\`` ran (recheck
+    copied and run; a `$HOME` or a backtick in the ask was EXPANDED, and a backticked `id` ran (recheck
     03-F5). Only words and plain punctuation survive; the ask only needs its words."""
     return re.sub(r"\s+", " ", re.sub(r"[^\w\s.,:/+@#=?()'\-]", " ", text or "")).strip()
 
@@ -3379,4 +3379,9 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    # A Windows console is cp1252 by default; a note title or message it cannot encode must print
+    # escaped, not end the run in UnicodeEncodeError.
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(errors="backslashreplace")
     sys.exit(main(sys.argv[1:]))

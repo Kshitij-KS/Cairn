@@ -97,11 +97,16 @@ export class SkyEngine {
     canvas.addEventListener("click", this.onClick);
     this.readTokens();
     this.resize();
+    // Names are measured once and cached. Geist arrives from the network after the first frames,
+    // and a cache of fallback-font widths would then place real, wider names on top of each other.
+    try { document.fonts?.addEventListener?.("loadingdone", this.onFonts); } catch { /* no font API */ }
   }
+  private onFonts = () => { this.widths.clear(); this.kick(); };
 
   destroy() {
     this.destroyed = true;
     cancelAnimationFrame(this.raf);
+    try { document.fonts?.removeEventListener?.("loadingdone", this.onFonts); } catch { /* no font API */ }
     this.sel.on(".zoom", null);
     this.canvas.removeEventListener("pointermove", this.onMove);
     this.canvas.removeEventListener("pointerleave", this.onLeave);

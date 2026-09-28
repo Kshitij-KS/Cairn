@@ -30,6 +30,7 @@ Exit codes are a public interface: 0 ok, 3 secret, 4 access denied, 5 invalid. A
 - [fact] An existing note's author never changes; stamp restores it and a change to it fails ^2d12eb
 - [fact] A lost claim id is reported as gone; ambiguous carry-forward gives a new id rather than moving one to another fact ^be7c9f
 - [fact] The secret scan matches key prefixes (sk-, sk-ant-) only at the start of a token, so a CSS name such as mask-image-linear-to-color in the built Atlas page is not read as a key ^70f36d
+- [fact] The guard resolves the notes root and git's repository root with realpath, so a tier reached through a symlink or a Windows 8.3 short name (C:\Users\RUNNER~1) keeps its prefix; tested through an alias in test_security ^8aaed9
 
 ## Relations
 - part_of [[Core]]

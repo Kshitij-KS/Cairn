@@ -34,7 +34,20 @@ for f in [".claude/settings.json", ".mcp.json", ".cursor/mcp.json", ".kiro/setti
 a = open(".agents/skills/team-memory/SKILL.md", "rb").read()
 for c in (".claude/skills/team-memory/SKILL.md", ".kiro/skills/team-memory/SKILL.md"):
     if open(c, "rb").read() != a: bad.append(c + " differs from the canonical skill")
-print("\n".join(bad) or "all parse; skill copies byte-identical"); sys.exit(1 if bad else 0)
+# Every Python file compiles with warnings as errors. Python 3.12 prints a SyntaxWarning for an
+# invalid escape like "\\`" in a docstring; mem.py carried one, the warning landed in the JSON the
+# suites parse, and 12 checks failed on CI's Python while 3.10 stayed silent and green.
+import subprocess, warnings
+for f in subprocess.run(["git", "ls-files", "*.py"], stdout=subprocess.PIPE, text=True).stdout.split():
+    with open(f, encoding="utf-8") as fh:
+        src = fh.read()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        try:
+            compile(src, f, "exec")
+        except (SyntaxError, SyntaxWarning, DeprecationWarning) as e:
+            bad.append("%s does not compile cleanly: %s" % (f, e))
+print("\n".join(bad) or "all parse; skill copies byte-identical; every .py compiles with warnings as errors"); sys.exit(1 if bad else 0)
 PY
 if [ -d web/node_modules ]; then
   # The committed page must be what its source builds to, then the page is driven at every size.

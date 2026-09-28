@@ -27,6 +27,7 @@ A public build never contains a restricted note, a trial or eval body, any note 
 - [fact] --verify compares with a fresh build by default and never trusts the file's own publication block ^735f09
 - [decision] Since 2026-09-28 the main view is a sky drawn on a canvas: each area a sunflower cluster with fixed homes, so nothing ever expands or overlaps; choosing a note flies the camera to it and brings its relations out to stand left (relied on) and right (relying); a grid of cards is the plain alternative ^f22fa6
 - [fact] web/index.html is a single file built by Vite from web/app and committed; npm run check-build fails if it drifts, and the build pins its two inline scripts by sha256 in the vercel.json CSP ^b72daf
+- [fact] The sky caches name widths and clears the cache when web fonts finish loading, so names measured in the fallback font are never drawn in the wider real one on top of each other ^76194f
 
 ## Relations
 - depends_on [[Memory Guard]]

@@ -446,4 +446,9 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    # A Windows console is cp1252 by default; a note title or message it cannot encode must print
+    # escaped, not end the run in UnicodeEncodeError.
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(errors="backslashreplace")
     sys.exit(main(sys.argv[1:]))

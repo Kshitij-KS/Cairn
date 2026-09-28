@@ -278,12 +278,16 @@ class Ctx:
     """Everything the checks need: where we are, who we are, and what the policy says."""
 
     def __init__(self, notes_root=None):
-        start = os.path.abspath(notes_root or os.getcwd())
+        # realpath on BOTH sides: git reports the repository by its real, long path, and the path we
+        # start from can be a symlink or a Windows 8.3 short name (C:\Users\RUNNER~1). A plain
+        # relpath between the two then produced a prefix of "../../RUNNER~1/..." and every path
+        # classified wrong (found by the Windows CI job).
+        start = os.path.realpath(notes_root or os.getcwd())
         self.notes_root = self._find_notes_root(start)
         top = git("-C", self.notes_root, "rev-parse", "--show-toplevel").strip()
         if not top:
             die("%s is not inside a git repository" % self.notes_root)
-        self.repo_root = os.path.abspath(top)
+        self.repo_root = os.path.realpath(top)
         rel = os.path.relpath(self.notes_root, self.repo_root).replace(os.sep, "/")
         self.prefix = "" if rel == "." else rel + "/"
 
@@ -2336,7 +2340,7 @@ def cmd_check(ctx, args):
     # the code moves on and nobody updates the description. Here the commit that moves the code is
     # told, by name, which feature note it left behind.
     root = code_root(ctx)
-    if root and os.path.abspath(root) == os.path.abspath(ctx.repo_root):
+    if root and os.path.normcase(os.path.realpath(root)) == os.path.normcase(ctx.repo_root):
         touched = {p for st_, p in files if st_ != "D"}
         code_changes = [p for p in touched if not is_note(ctx, p)]
         for fpath, title, covers, fstatus in load_features(ctx):
@@ -2786,4 +2790,9 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    # A Windows console is cp1252 by default; a note title or message it cannot encode must print
+    # escaped, not end the run in UnicodeEncodeError.
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(errors="backslashreplace")
     sys.exit(main(sys.argv[1:]))

@@ -44,7 +44,10 @@ import subprocess
 import sys
 import time
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+# realpath, never abspath: git names the repository by its real, long path, and a relpath from a
+# symlinked or 8.3 short path (C:\Users\RUNNER~1) to it came out as "../../RUNNER~1/...", so every
+# memory commit looked like it changed files outside the tier (found by the Windows CI job).
+HERE = os.path.dirname(os.path.realpath(__file__))
 NOTES_ROOT = os.path.dirname(HERE)
 MODES = ("pre", "post", "status")
 EXIT_BUSY = 75
@@ -191,7 +194,7 @@ def _top():
     if not _ROOT:
         p = subprocess.run(["git", "-C", NOTES_ROOT, "rev-parse", "--show-toplevel"], stdout=subprocess.PIPE,
                            stderr=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace")
-        _ROOT.append(p.stdout.strip() or NOTES_ROOT)
+        _ROOT.append(os.path.realpath(p.stdout.strip()) if p.stdout.strip() else NOTES_ROOT)
     return _ROOT[0]
 
 
@@ -204,7 +207,8 @@ def _git(*args, check=False):
 
 
 def repo_root():
-    return _git("rev-parse", "--show-toplevel").stdout.strip()
+    top = _git("rev-parse", "--show-toplevel").stdout.strip()
+    return os.path.realpath(top) if top else ""
 
 
 def sync_mode(env):
@@ -533,4 +537,9 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    # A Windows console is cp1252 by default; a note title or message it cannot encode must print
+    # escaped, not end the run in UnicodeEncodeError.
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(errors="backslashreplace")
     sys.exit(main(sys.argv[1:]))
