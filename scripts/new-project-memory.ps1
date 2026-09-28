@@ -11,6 +11,16 @@
   anyway: the memory guard is Python. No param() block on purpose, so --update reaches Python as is.
 #>
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
+# Windows PowerShell 5.1 does not escape a double quote inside an argument it hands to a native
+# program, so Python received 'na"me' as 'name' and scaffolded a tier under a name nobody typed
+# (found by the Windows CI job). No valid argument contains one: refuse it here, before anything
+# is written.
+foreach ($a in $args) {
+  if ("$a".Contains('"')) {
+    [Console]::Error.WriteLine('ERROR: an argument contains a double quote ("), which cannot reach Python intact from PowerShell. A project name is lower-case letters, digits and hyphens.')
+    exit 1
+  }
+}
 $script = Join-Path $here 'new_project_memory.py'
 foreach ($c in @('py', 'python', 'python3')) {
   $cmd = Get-Command $c -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
